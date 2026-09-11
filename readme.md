@@ -1140,9 +1140,6 @@ Together these demonstrate the core properties of the proposed sovereign workben
 
 ---
 
-# Need Professional Help in Developing Your Architecture?
-
-Please contact me at [sammuti.com](https://sammuti.com) :)
 
 ---
 
