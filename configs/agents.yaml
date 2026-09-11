@@ -1,0 +1,4 @@
+agents:
+  default:
+    max_retries: 2
+    require_approval_for_artifacts: true

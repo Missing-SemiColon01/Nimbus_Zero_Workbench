@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+.next/
+data/uploads/*
+data/artifacts/*
+data/tmp/*
+!data/uploads/.gitkeep
+!data/artifacts/.gitkeep
+!data/tmp/.gitkeep

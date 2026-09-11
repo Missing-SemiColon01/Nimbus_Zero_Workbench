@@ -1,0 +1,19 @@
+models:
+  - id: reasoning
+    runtime: ollama
+    model: qwen3:14b
+    capabilities: [reasoning, planning, tool_calling]
+    modalities: [text]
+    priority: 10
+  - id: coding
+    runtime: ollama
+    model: qwen2.5-coder:14b
+    capabilities: [coding, debugging, tool_calling]
+    modalities: [text]
+    priority: 10
+  - id: vision
+    runtime: ollama
+    model: qwen2.5-vl:7b
+    capabilities: [vision, document_understanding]
+    modalities: [text, image]
+    priority: 10

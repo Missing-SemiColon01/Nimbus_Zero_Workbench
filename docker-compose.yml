@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    ports: ["8000:8000"]
+    volumes: ["./data:/app/data", "./configs:/app/configs:ro"]
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on: [ollama]
+  ollama:
+    image: ollama/ollama:latest
+    volumes: ["ollama:/root/.ollama"]
+    # Bind only internally in production; provision models before air-gapping.
+  ui:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports: ["3000:3000"]
+    volumes: ["./frontend:/app"]
+    environment: ["NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1"]
+volumes:
+  ollama:

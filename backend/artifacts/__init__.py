@@ -1,0 +1,1 @@
+"""Artifact specifications and generators."""

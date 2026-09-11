@@ -1143,3 +1143,38 @@ Together these demonstrate the core properties of the proposed sovereign workben
 # Need Professional Help in Developing Your Architecture?
 
 Please contact me at [sammuti.com](https://sammuti.com) :)
+
+---
+
+# Current Project Scaffold
+
+The repository now includes an executable foundation for the architecture above.
+
+```text
+backend/             FastAPI API, agent state/runtime, model gateway, tool and policy contracts
+configs/             Model, tool, agent, and policy configuration
+frontend/            Minimal Next.js task-submission UI
+sandbox/             Non-root sandbox image foundation
+data/                Local uploads, knowledge, artifacts, and temporary-work directories
+tests/               Initial model-routing tests
+```
+
+## Start locally
+
+```bash
+cp .env.example .env
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt pytest
+.venv/bin/uvicorn backend.main:app --reload
+```
+
+Then open `http://localhost:8000/docs`. The scaffold exposes `GET /api/v1/health`,
+`GET /api/v1/models`, and `POST /api/v1/tasks`. A task is planned and routed from
+local configuration only; model generation, tool execution, storage, RAG, and
+artifact implementations remain intentionally separate adapters to complete next.
+
+To run the initial routing checks:
+
+```bash
+.venv/bin/pytest
+```

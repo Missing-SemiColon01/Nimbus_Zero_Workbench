@@ -1,0 +1,10 @@
+tools:
+  - file.read
+  - file.write
+  - rag.search
+  - vision.analyze
+  - calculator.execute
+  - spreadsheet.create
+  - document.create
+  - presentation.create
+  - sandbox.execute
