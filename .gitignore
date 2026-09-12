@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 node_modules/
 .next/
 data/uploads/*
@@ -10,6 +14,7 @@ data/tmp/*
 !data/uploads/.gitkeep
 !data/artifacts/.gitkeep
 !data/tmp/.gitkeep
+<<<<<<< HEAD
 
 # Virtual environments
 .venv
@@ -23,3 +28,6 @@ uv.lock
 data/knowledge/qdrant/
 data/knowledge/chroma/
 data/knowledge/model_cache/
+=======
+.venv/
+>>>>>>> 313fb41 (Implement model provider registry)
