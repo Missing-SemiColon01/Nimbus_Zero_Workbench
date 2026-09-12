@@ -6,6 +6,12 @@ from backend.knowledge.chunker import (
     chunk_text,
     count_tokens,
 )
+from backend.knowledge.embedder import (
+    DEFAULT_MODEL_NAME,
+    EMBEDDING_DIMENSION,
+    LocalEmbedder,
+    get_embedder,
+)
 from backend.knowledge.ocr import (
     OCRResult,
     clean_ocr_text,
@@ -28,4 +34,8 @@ __all__ = [
     "chunk_document",
     "chunk_text",
     "count_tokens",
+    "LocalEmbedder",
+    "get_embedder",
+    "DEFAULT_MODEL_NAME",
+    "EMBEDDING_DIMENSION",
 ]
