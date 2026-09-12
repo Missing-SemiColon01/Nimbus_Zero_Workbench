@@ -12,3 +12,4 @@ class TaskResponse(BaseModel):
     status: str
     selected_model: str | None
     plan: list[str]
+    response: str
