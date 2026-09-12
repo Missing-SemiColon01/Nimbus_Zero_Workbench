@@ -14,10 +14,10 @@ data/tmp/*
 !data/uploads/.gitkeep
 !data/artifacts/.gitkeep
 !data/tmp/.gitkeep
-<<<<<<< HEAD
 
 # Virtual environments
 .venv
+.venv/
 venv/
 env/
 
@@ -28,6 +28,3 @@ uv.lock
 data/knowledge/qdrant/
 data/knowledge/chroma/
 data/knowledge/model_cache/
-=======
-.venv/
->>>>>>> 313fb41 (Implement model provider registry)
