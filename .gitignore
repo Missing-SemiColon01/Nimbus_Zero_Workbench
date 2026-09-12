@@ -10,3 +10,16 @@ data/tmp/*
 !data/uploads/.gitkeep
 !data/artifacts/.gitkeep
 !data/tmp/.gitkeep
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Lockfiles
+uv.lock
+
+# Dev 2 — RAG pipeline (auto-generated, not source code)
+data/knowledge/qdrant/
+data/knowledge/chroma/
+data/knowledge/model_cache/
