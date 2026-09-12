@@ -16,7 +16,6 @@ data/tmp/*
 !data/tmp/.gitkeep
 
 # Virtual environments
-.venv
 .venv/
 venv/
 env/
