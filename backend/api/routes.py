@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 
+from backend.models.providers import ProviderError
 from backend.models.router import NoCompatibleModelError
 from backend.schemas.tasks import TaskCreate, TaskResponse
 
@@ -19,7 +20,15 @@ async def models(request: Request):
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreate, request: Request):
     try:
-        state = request.app.state.runtime.begin(payload.request, payload.capabilities, payload.modality)
+        state, model_response = await request.app.state.runtime.run(payload.request, payload.capabilities, payload.modality)
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return TaskResponse(task_id=state.task_id, status=state.status, selected_model=state.selected_model, plan=state.plan)
+    except ProviderError as error:
+        raise HTTPException(status_code=502, detail="Model generation failed") from error
+    return TaskResponse(
+        task_id=state.task_id,
+        status=state.status,
+        selected_model=state.selected_model,
+        plan=state.plan,
+        response=model_response.content,
+    )
