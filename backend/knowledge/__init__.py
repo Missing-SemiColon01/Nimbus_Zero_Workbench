@@ -1,5 +1,11 @@
 """backend.knowledge - RAG pipeline components (Dev 2)."""
 
+from backend.knowledge.chunker import (
+    Chunk,
+    chunk_document,
+    chunk_text,
+    count_tokens,
+)
 from backend.knowledge.ocr import (
     OCRResult,
     clean_ocr_text,
@@ -18,4 +24,8 @@ __all__ = [
     "clean_ocr_text",
     "is_tesseract_available",
     "extract_text_from_image",
+    "Chunk",
+    "chunk_document",
+    "chunk_text",
+    "count_tokens",
 ]
