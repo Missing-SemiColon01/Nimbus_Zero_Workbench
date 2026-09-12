@@ -1,5 +1,27 @@
+# ── Core API ─────────────────────────────────────────────────────────────────
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 pydantic-settings>=2.6,<3
 PyYAML>=6,<7
 httpx>=0.27,<1
+
+# ── Dev 2 — PDF Parsing & OCR ─────────────────────────────────────────────────
+pymupdf>=1.24               # PDF page text + image extraction (import as fitz)
+pytesseract>=0.3            # OCR wrapper around Tesseract binary
+Pillow>=10                  # Image handling for OCR + vision
+
+# ── Dev 2 — Quantized Local Embeddings (INT8, CPU-fast, no GPU needed) ────────
+optimum[onnxruntime]>=1.19  # Export/load ONNX quantized sentence-transformer
+onnxruntime>=1.18           # ONNX runtime for INT8 inference
+transformers>=4.40          # Tokenizer for all-MiniLM-L6-v2
+
+# ── Dev 2 — Fast Local Vector Store ───────────────────────────────────────────
+qdrant-client>=1.9          # Qdrant local-mode (no server, persists to disk)
+
+# ── Shared — LangChain (Dev 1 + Dev 2) ────────────────────────────────────────
+langchain>=0.3
+langchain-community>=0.3
+langchain-ollama>=0.2       # Ollama integration for LangChain
+
+# ── Dev 2 — Chunking utility ──────────────────────────────────────────────────
+tiktoken>=0.7               # Token counting for accurate chunk sizes
