@@ -82,22 +82,12 @@ def _render_page_to_pil(page: fitz.Page, dpi: int = _OCR_DPI) -> Image.Image:
 
 
 def _ocr_page(page: fitz.Page, dpi: int = _OCR_DPI) -> str:
-    """
-    Run Tesseract on a rendered page image.
-
-    Tesseract is imported lazily so the module still loads even if the
-    Tesseract binary is not installed (it will simply error at call time).
-    """
-    try:
-        import pytesseract  # lazy import -- Tesseract binary may not be present
-    except ImportError as exc:
-        raise RuntimeError(
-            "pytesseract is not installed. Add it to requirements.txt."
-        ) from exc
+    """Run OCR on a rendered page image via the OCR engine."""
+    from backend.knowledge.ocr import ocr_image
 
     pil_image = _render_page_to_pil(page, dpi)
-    text: str = pytesseract.image_to_string(pil_image, lang="eng")
-    return text
+    result = ocr_image(pil_image)
+    return result.text if result.has_text else ""
 
 
 def _extract_page(fitz_page: fitz.Page) -> ParsedPage:
