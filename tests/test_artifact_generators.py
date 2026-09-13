@@ -1,11 +1,13 @@
 from pathlib import Path
 
+import fitz
 from docx import Document
 from pptx import Presentation
 
 from backend.artifacts import (
     ApprovalNoteSpec,
     DocxGenerator,
+    PdfApprovalNoteGenerator,
     PptxGenerator,
     PresentationSpec,
     SlideLayout,
@@ -50,3 +52,21 @@ def test_pptx_generator_supports_all_day_one_layouts(tmp_path: Path):
     assert artifact.type == "pptx"
     assert artifact.metadata["slide_count"] == 6
     assert len(Presentation(path).slides) == 6
+
+
+def test_pdf_generator_creates_readable_approval_note(tmp_path: Path):
+    artifact = PdfApprovalNoteGenerator(tmp_path).generate(
+        ApprovalNoteSpec(
+            subject="Pump P-101 repair approval",
+            purpose="Obtain approval for the proposed repair.",
+            findings=["Abnormal vibration observed during inspection."],
+            recommendation="Repair the bearing assembly during the next shutdown.",
+            requested_approval="Approve the repair work order.",
+        ),
+        task_id="task-123",
+    )
+
+    document = fitz.open(artifact.storage_uri)
+    assert document.page_count == 1
+    assert "Pump P-101 repair approval" in document[0].get_text()
+    document.close()
