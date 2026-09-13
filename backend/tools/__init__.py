@@ -3,6 +3,7 @@
 from backend.tools.contracts import Tool, ToolResult
 from backend.tools.rag_tool import RAGSearchTool
 from backend.tools.registry import ToolRegistry
+from backend.tools.setup import build_tool_registry
 from backend.tools.vision_tool import VisionAnalyzeTool
 
 __all__ = [
@@ -11,4 +12,5 @@ __all__ = [
     "ToolRegistry",
     "RAGSearchTool",
     "VisionAnalyzeTool",
+    "build_tool_registry",
 ]
