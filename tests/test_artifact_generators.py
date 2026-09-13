@@ -8,6 +8,7 @@ from backend.artifacts import (
     ApprovalNoteSpec,
     DocxGenerator,
     PdfApprovalNoteGenerator,
+    PdfArtifactValidator,
     PptxGenerator,
     PresentationSpec,
     SlideLayout,
@@ -70,3 +71,25 @@ def test_pdf_generator_creates_readable_approval_note(tmp_path: Path):
     assert document.page_count == 1
     assert "Pump P-101 repair approval" in document[0].get_text()
     document.close()
+
+
+def test_pdf_validator_checks_content_and_creates_local_preview(tmp_path: Path):
+    artifact = PdfApprovalNoteGenerator(tmp_path).generate(
+        ApprovalNoteSpec(
+            subject="Pump P-101 repair approval",
+            purpose="Obtain approval for the proposed repair.",
+            recommendation="Repair the bearing assembly during the next shutdown.",
+            requested_approval="Approve the repair work order.",
+        ),
+        task_id="task-123",
+    )
+
+    validation = PdfArtifactValidator(tmp_path / "previews").validate(
+        artifact,
+        required_text=["Pump P-101 repair approval", "Approval Requested"],
+    )
+
+    assert validation.valid
+    assert all(validation.checks.values())
+    assert validation.preview_path
+    assert Path(validation.preview_path).exists()
