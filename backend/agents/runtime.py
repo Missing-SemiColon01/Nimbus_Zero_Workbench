@@ -2,7 +2,7 @@ import uuid
 
 from backend.agents.state import AgentState
 from backend.models.contracts import ModelRequest, ModelResponse
-from backend.models.providers import ModelProviderRegistry
+from backend.models.providers import ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter
 
 
@@ -18,10 +18,30 @@ class AgentRuntime:
             required_capabilities=capabilities,
             required_modality=modality,
         )
-        selected_model = self.router.select(model_request)
         state = AgentState(task_id=str(uuid.uuid4()), user_request=user_request, status="planning")
         state.plan = ["classify_task", "select_model", "execute", "validate"]
-        state.selected_model = selected_model.id
-        response = await self.providers.generate(selected_model, model_request)
-        state.status = "completed"
-        return state, response
+        candidates = self.router.candidates(model_request)
+        if not candidates:
+            # Preserve the router's established public error for this case.
+            self.router.select(model_request)
+
+        last_error: ProviderError | None = None
+        for model in candidates:
+            state.attempted_models.append(model.id)
+            try:
+                response = await self.providers.generate(model, model_request)
+            except ProviderRequestError:
+                # A malformed request must not be retried against another model.
+                raise
+            except ProviderError as error:
+                last_error = error
+                continue
+
+            state.selected_model = model.id
+            state.provider = model.runtime
+            state.fallback_used = len(state.attempted_models) > 1
+            state.status = "completed"
+            return state, response
+
+        assert last_error is not None
+        raise last_error
