@@ -3,6 +3,7 @@
 from backend.artifacts.contracts import ApprovalNoteSpec, Artifact, PresentationSpec, SlideLayout, SlideSpec
 from backend.artifacts.docx_generator import DocxGenerator
 from backend.artifacts.pptx_generator import PptxGenerator
+from backend.artifacts.tools import DocumentCreateTool, PresentationCreateTool
 
 __all__ = [
     "ApprovalNoteSpec",
@@ -12,4 +13,6 @@ __all__ = [
     "SlideSpec",
     "DocxGenerator",
     "PptxGenerator",
+    "DocumentCreateTool",
+    "PresentationCreateTool",
 ]
