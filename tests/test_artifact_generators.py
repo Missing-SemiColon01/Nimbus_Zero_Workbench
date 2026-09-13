@@ -9,6 +9,7 @@ from backend.artifacts import (
     DocxGenerator,
     PdfApprovalNoteGenerator,
     PdfArtifactValidator,
+    OfficeArtifactValidator,
     PptxGenerator,
     PresentationSpec,
     SlideLayout,
@@ -93,3 +94,26 @@ def test_pdf_validator_checks_content_and_creates_local_preview(tmp_path: Path):
     assert all(validation.checks.values())
     assert validation.preview_path
     assert Path(validation.preview_path).exists()
+
+
+def test_office_validator_checks_docx_and_pptx_content(tmp_path: Path):
+    docx = DocxGenerator(tmp_path).generate(
+        ApprovalNoteSpec(
+            subject="Pump P-101 repair approval",
+            purpose="Obtain approval for the proposed repair.",
+            recommendation="Repair the bearing assembly.",
+            requested_approval="Approve the repair work order.",
+        ),
+        task_id="task-123",
+    )
+    pptx = PptxGenerator(tmp_path).generate(
+        PresentationSpec(
+            title="Inspection review",
+            slides=[SlideSpec(layout=SlideLayout.EXECUTIVE_SUMMARY, title="Executive summary", bullets=["Action is required"])],
+        ),
+        task_id="task-123",
+    )
+    validator = OfficeArtifactValidator()
+
+    assert validator.validate(docx, required_text=["Pump P-101 repair approval", "Approval Requested"]).valid
+    assert validator.validate(pptx, required_text=["Executive summary", "Action is required"]).valid
