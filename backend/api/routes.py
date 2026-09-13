@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
-from backend.models.providers import ProviderError
+from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import NoCompatibleModelError
 from backend.schemas.knowledge import (
     IngestRequest,
@@ -32,7 +32,13 @@ async def health(request: Request):
 @router.get("/models")
 async def models(request: Request):
     return [
-        {"id": item.id, "capabilities": sorted(item.capabilities), "modalities": sorted(item.modalities)}
+        {
+            "id": item.id,
+            "capabilities": sorted(item.capabilities),
+            "modalities": sorted(item.modalities),
+            "priority": item.priority,
+            "enabled": item.enabled,
+        }
         for item in request.app.state.registry.models
     ]
 
@@ -59,15 +65,22 @@ async def list_tools(request: Request):
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreate, request: Request):
     try:
-        state, model_response = await request.app.state.runtime.run(payload.request, payload.capabilities, payload.modality)
+        state, model_response = await request.app.state.runtime.run(
+            payload.request, payload.required_capabilities, payload.modality
+        )
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except ProviderRequestError as error:
+        raise HTTPException(status_code=422, detail="Model generation request is invalid") from error
     except ProviderError as error:
         raise HTTPException(status_code=502, detail="Model generation failed") from error
     return TaskResponse(
         task_id=state.task_id,
         status=state.status,
         selected_model=state.selected_model,
+        provider=state.provider,
+        fallback_used=state.fallback_used,
+        attempted_models=state.attempted_models,
         plan=state.plan,
         response=model_response.content,
     )

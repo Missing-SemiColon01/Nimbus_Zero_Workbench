@@ -11,6 +11,7 @@ from backend.models.providers import (
     OllamaProvider,
     ProviderError,
     ProviderNotFoundError,
+    ProviderRequestError,
 )
 
 
@@ -139,3 +140,19 @@ def test_ollama_provider_raises_provider_error_on_http_failure(monkeypatch):
                 ModelRequest(prompt="trigger failure"),
             )
         )
+
+
+def test_ollama_provider_marks_bad_request_as_non_retryable(monkeypatch):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid request"})
+
+    transport = httpx.MockTransport(handler)
+
+    class TestClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            super().__init__(transport=transport, **kwargs)
+
+    monkeypatch.setattr("backend.models.providers.httpx.AsyncClient", TestClient)
+
+    with pytest.raises(ProviderRequestError):
+        asyncio.run(OllamaProvider("http://ollama:11434").generate(MODEL, ModelRequest(prompt="bad")))
