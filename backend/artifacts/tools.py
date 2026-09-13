@@ -1,4 +1,4 @@
-"""Tool-layer adapters for locally generated DOCX and PPTX artifacts."""
+"""Tool-layer adapters for locally generated DOCX, PPTX, and PDF artifacts."""
 
 from pathlib import Path
 from typing import Any
@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from backend.artifacts.contracts import ApprovalNoteSpec, PresentationSpec
 from backend.artifacts.docx_generator import DocxGenerator
 from backend.artifacts.pptx_generator import PptxGenerator
+from backend.artifacts.pdf_generator import PdfApprovalNoteGenerator
 from backend.tools.contracts import Tool, ToolResult
 
 
@@ -40,6 +41,23 @@ class PresentationCreateTool(Tool):
         return _generate(
             generator=self.generator,
             spec_type=PresentationSpec,
+            arguments=arguments,
+            context=context,
+        )
+
+
+class PdfCreateTool(Tool):
+    """Create a local approval-note PDF from an ApprovalNoteSpec payload."""
+
+    name = "pdf.create"
+
+    def __init__(self, artifact_dir: Path):
+        self.generator = PdfApprovalNoteGenerator(artifact_dir)
+
+    async def execute(self, arguments: dict[str, Any], context: dict[str, Any]) -> ToolResult:
+        return _generate(
+            generator=self.generator,
+            spec_type=ApprovalNoteSpec,
             arguments=arguments,
             context=context,
         )

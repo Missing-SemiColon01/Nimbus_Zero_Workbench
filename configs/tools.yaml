@@ -7,4 +7,5 @@ tools:
   - spreadsheet.create
   - document.create
   - presentation.create
+  - pdf.create
   - sandbox.execute
