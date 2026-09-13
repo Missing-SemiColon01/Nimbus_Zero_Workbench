@@ -24,6 +24,14 @@ class ProviderError(RuntimeError):
     """Base error for failures at the model-provider boundary."""
 
 
+class ProviderRequestError(ProviderError):
+    """The provider rejected a malformed or invalid generation request.
+
+    Retrying another model cannot make an invalid request valid, so callers
+    must surface this error rather than treating it as an availability issue.
+    """
+
+
 class ProviderNotFoundError(ProviderError):
     """Raised when no adapter has been registered for a model runtime."""
 
@@ -71,6 +79,14 @@ class OllamaProvider(ModelProvider):
                 response = await client.post(f"{self.base_url}/api/generate", json=payload)
                 response.raise_for_status()
                 data = response.json()
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code in {400, 422}:
+                    raise ProviderRequestError(
+                        f"Ollama rejected generation request for model '{model.id}'"
+                    ) from error
+                raise ProviderError(f"Ollama generation failed for model '{model.id}'") from error
             except httpx.HTTPError as error:
                 raise ProviderError(f"Ollama generation failed for model '{model.id}'") from error
+            except ValueError as error:
+                raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'") from error
         return ModelResponse(content=data.get("response", ""), model_id=model.id, raw=data)

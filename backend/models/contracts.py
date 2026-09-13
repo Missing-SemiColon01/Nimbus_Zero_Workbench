@@ -25,3 +25,4 @@ class ModelDefinition:
     capabilities: set[str]
     modalities: set[str]
     priority: int = 0
+    enabled: bool = True

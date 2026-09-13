@@ -19,3 +19,36 @@ def test_routes_coding_to_coding_model():
 def test_rejects_unavailable_capability():
     with pytest.raises(NoCompatibleModelError):
         router().select(ModelRequest("do something", {"audio"}))
+
+
+def test_candidates_skip_disabled_models_and_sort_by_priority(tmp_path: Path):
+    config = tmp_path / "models.yaml"
+    config.write_text(
+        """models:
+  - id: disabled
+    runtime: fake
+    model: disabled
+    capabilities: [coding]
+    modalities: [text]
+    priority: 100
+    enabled: false
+  - id: fallback
+    runtime: fake
+    model: fallback
+    capabilities: [coding]
+    modalities: [text]
+    priority: 5
+    enabled: true
+  - id: preferred
+    runtime: fake
+    model: preferred
+    capabilities: [coding]
+    modalities: [text]
+    priority: 10
+    enabled: true
+"""
+    )
+
+    selected = ModelRouter(ModelRegistry(config)).candidates(ModelRequest("write", {"coding"}))
+
+    assert [model.id for model in selected] == ["preferred", "fallback"]

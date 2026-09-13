@@ -12,5 +12,8 @@ class AgentState:
     tool_results: list[dict] = field(default_factory=list)
     retrieved_context: list[dict] = field(default_factory=list)
     selected_model: str | None = None
+    provider: str | None = None
+    fallback_used: bool = False
+    attempted_models: list[str] = field(default_factory=list)
     approval_required: bool = False
     status: str = "queued"

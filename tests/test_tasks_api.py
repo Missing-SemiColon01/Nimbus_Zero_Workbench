@@ -3,7 +3,7 @@ import pytest
 
 from backend.main import app
 from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse
-from backend.models.providers import ModelProvider, ProviderError
+from backend.models.providers import ModelProvider, ProviderError, ProviderRequestError
 
 
 class FakeProvider(ModelProvider):
@@ -19,6 +19,26 @@ class FakeProvider(ModelProvider):
 class FailingProvider(ModelProvider):
     async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
         raise ProviderError("Ollama is unavailable")
+
+
+class FailFirstProvider(ModelProvider):
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.calls.append(model.id)
+        if model.id == "reasoning":
+            raise ProviderError("model is temporarily unavailable")
+        return ModelResponse(content="Fallback answer", model_id=model.id)
+
+
+class InvalidRequestProvider(ModelProvider):
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.calls.append(model.id)
+        raise ProviderRequestError("prompt is malformed")
 
 
 @pytest.mark.asyncio
@@ -37,6 +57,9 @@ async def test_create_task_generates_response_with_selected_model():
     assert body["task_id"]
     assert body["status"] == "completed"
     assert body["selected_model"] == "reasoning"
+    assert body["provider"] == "ollama"
+    assert body["fallback_used"] is False
+    assert body["attempted_models"] == ["reasoning"]
     assert body["plan"] == ["classify_task", "select_model", "execute", "validate"]
     assert body["response"] == "Generated answer"
     assert len(provider.calls) == 1
@@ -57,3 +80,60 @@ async def test_create_task_returns_clean_error_when_provider_fails():
 
     assert response.status_code == 502
     assert response.json() == {"detail": "Model generation failed"}
+
+
+@pytest.mark.asyncio
+async def test_create_task_falls_back_to_next_eligible_model():
+    provider = FailFirstProvider()
+    async with app.router.lifespan_context(app):
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={"request": "Explain model routing", "task_type": "reasoning"},
+            )
+
+    assert response.status_code == 201
+    assert response.json() | {"task_id": "ignored"} == {
+        "task_id": "ignored",
+        "status": "completed",
+        "selected_model": "reasoning-fallback",
+        "provider": "ollama",
+        "fallback_used": True,
+        "attempted_models": ["reasoning", "reasoning-fallback"],
+        "plan": ["classify_task", "select_model", "execute", "validate"],
+        "response": "Fallback answer",
+    }
+    assert provider.calls == ["reasoning", "reasoning-fallback"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_does_not_fallback_for_invalid_provider_request():
+    provider = InvalidRequestProvider()
+    async with app.router.lifespan_context(app):
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={"request": "Explain model routing", "task_type": "reasoning"},
+            )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Model generation request is invalid"}
+    assert provider.calls == ["reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_maps_task_type_to_capability():
+    provider = FakeProvider()
+    async with app.router.lifespan_context(app):
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={"request": "Write a unit test", "task_type": "coding"},
+            )
+
+    assert response.status_code == 201
+    assert response.json()["selected_model"] == "coding"
+    assert provider.calls[0][1].required_capabilities == {"coding"}
