@@ -20,6 +20,13 @@ from backend.knowledge.ocr import (
     ocr_image,
 )
 from backend.knowledge.pdf_parser import ParsedDocument, ParsedPage, parse_pdf
+from backend.knowledge.vector_store import (
+    DEFAULT_COLLECTION_NAME,
+    DEFAULT_STORAGE_PATH,
+    SearchResult,
+    VectorStore,
+    get_vector_store,
+)
 
 __all__ = [
     "parse_pdf",
@@ -38,4 +45,9 @@ __all__ = [
     "get_embedder",
     "DEFAULT_MODEL_NAME",
     "EMBEDDING_DIMENSION",
+    "VectorStore",
+    "SearchResult",
+    "get_vector_store",
+    "DEFAULT_COLLECTION_NAME",
+    "DEFAULT_STORAGE_PATH",
 ]
