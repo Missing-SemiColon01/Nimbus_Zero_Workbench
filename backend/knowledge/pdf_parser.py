@@ -169,6 +169,9 @@ def parse_pdf(source: str | Path, pages: Sequence[int] | None = None) -> ParsedD
 
     try:
         doc: fitz.Document = fitz.open(str(source_path))
+        if doc.is_encrypted and doc.needs_pass:
+            doc.close()
+            raise ValueError(f"Cannot open PDF '{source_path.name}': Document is password-protected or encrypted.")
     except Exception as exc:
         raise ValueError(f"Cannot open PDF '{source_path.name}': {exc}") from exc
 
