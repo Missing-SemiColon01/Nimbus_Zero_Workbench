@@ -107,6 +107,8 @@ def test_runtime_successful_generation(tmp_path: Path):
     assert state.errors == []
     assert state.plan == ["generate_response"]
     assert isinstance(state.task_id, str) and len(state.task_id) > 0
+    assert isinstance(state.execution_duration, float)
+    assert state.execution_duration >= 0
 
 
 def test_runtime_provider_failure_returns_predictable_response(tmp_path: Path):
@@ -122,7 +124,47 @@ def test_runtime_provider_failure_returns_predictable_response(tmp_path: Path):
     assert state.final_response == response.content
     assert state.messages == ["test prompt", response.content]
     assert state.selected_model == "backup"
+    assert state.provider is None
     assert provider.calls == ["primary", "backup"]
+    assert isinstance(state.execution_duration, float)
+    assert state.execution_duration >= 0
+
+
+def test_runtime_status_lifecycle_and_execution_metadata(tmp_path: Path):
+    provider = SuccessProvider()
+    rt = runtime(tmp_path, provider)
+
+    # Initial graph step validation
+    initial_graph_state = {
+        "task_id": "test-task-id",
+        "user_prompt": "analyze data",
+        "selected_model": None,
+        "messages": ["analyze data"],
+        "final_response": None,
+        "errors": [],
+        "attempted_models": [],
+        "provider": None,
+        "fallback_used": False,
+        "model_response": None,
+        "required_capabilities": {"reasoning"},
+        "modality": "text",
+        "status": "queued",
+        "execution_duration": None,
+    }
+
+    # Verify input validation step transitions queued -> running
+    running_state = asyncio.run(rt._validate_input(initial_graph_state))
+    assert running_state["status"] == "running"
+
+    # Verify full run completes with execution metadata
+    state, response = asyncio.run(rt.run("analyze data", {"reasoning"}, task_id="custom-id"))
+    assert state.task_id == "custom-id"
+    assert state.status == "completed"
+    assert state.selected_model == "primary"
+    assert state.provider == "fake"
+    assert isinstance(state.execution_duration, float)
+    assert state.execution_duration >= 0
+
 
 
 def test_runtime_rejects_empty_or_whitespace_user_prompt(tmp_path: Path):

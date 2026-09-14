@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any, TypedDict
-
 
 from langgraph.graph import END, START, StateGraph
 
@@ -27,6 +27,8 @@ class AgentGraphState(TypedDict):
     model_response: ModelResponse | None
     required_capabilities: set[str]
     modality: str
+    status: str
+    execution_duration: float | None
 
 
 class AgentRuntime:
@@ -53,6 +55,7 @@ class AgentRuntime:
         task_id: str | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         """Run the agent workflow for one task."""
+        start_time = time.perf_counter()
         resolved_task_id = task_id or str(uuid.uuid4())
         initial_messages = [user_request] if isinstance(user_request, str) and user_request.strip() else []
 
@@ -69,17 +72,23 @@ class AgentRuntime:
             "model_response": None,
             "required_capabilities": capabilities,
             "modality": modality,
+            "status": "queued",
+            "execution_duration": None,
         }
 
         # Pre-validate input state before invoking workflow
         validate_state(initial_state, require_model=False)
 
         result = await self.graph.ainvoke(initial_state)
+        execution_duration = round(time.perf_counter() - start_time, 4)
+
         model_response = result.get("model_response")
         assert model_response is not None
 
-        is_failure = result.get("provider") is None and bool(result.get("errors"))
-        status = "failed" if is_failure else "completed"
+        status = result.get("status")
+        if not status:
+            is_failure = result.get("provider") is None and bool(result.get("errors"))
+            status = "failed" if is_failure else "completed"
 
         state = AgentState(
             task_id=result["task_id"],
@@ -94,13 +103,14 @@ class AgentRuntime:
             fallback_used=result["fallback_used"],
             attempted_models=result["attempted_models"],
             status=status,
+            execution_duration=execution_duration,
         )
         return state, model_response
 
     async def _validate_input(self, state: AgentGraphState) -> dict[str, Any]:
-        """Validate input state fields inside the graph workflow."""
+        """Validate input state fields inside the graph workflow and transition to running."""
         validate_state(state, require_model=False)
-        return {}
+        return {"status": "running"}
 
     async def _validate_output(self, state: AgentGraphState) -> dict[str, Any]:
         """Validate output state fields including selected_model."""
@@ -143,6 +153,7 @@ class AgentRuntime:
                 "final_response": response.content,
                 "errors": errors,
                 "model_response": response,
+                "status": "completed",
             }
 
         # If all candidates fail:
@@ -165,5 +176,7 @@ class AgentRuntime:
             "final_response": predictable_response,
             "errors": errors,
             "model_response": model_response,
+            "status": "failed",
         }
+
 

@@ -91,6 +91,8 @@ class AgentState:
     attempted_models: list[str] = field(default_factory=list)
     approval_required: bool = False
     status: str = "queued"
+    execution_duration: float | None = None
+
 
     def __post_init__(self) -> None:
         if self.user_prompt is None:

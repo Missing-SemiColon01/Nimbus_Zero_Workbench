@@ -87,7 +87,9 @@ async def create_task(payload: TaskCreate, request: Request):
         attempted_models=state.attempted_models,
         plan=state.plan,
         response=state.final_response or model_response.content,
+        execution_duration=state.execution_duration,
     )
+
 
 
 # -- Knowledge & Ingest API (Day 2 — Task 2.5) ----------------------------------

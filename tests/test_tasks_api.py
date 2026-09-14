@@ -62,6 +62,8 @@ async def test_create_task_generates_response_with_selected_model():
     assert body["attempted_models"] == ["reasoning"]
     assert body["plan"] == ["generate_response"]
     assert body["response"] == "Generated answer"
+    assert isinstance(body["execution_duration"], float)
+    assert body["execution_duration"] >= 0
     assert len(provider.calls) == 1
     model, request = provider.calls[0]
     assert model.id == "reasoning"
@@ -94,7 +96,7 @@ async def test_create_task_falls_back_to_next_eligible_model():
             )
 
     assert response.status_code == 201
-    assert response.json() | {"task_id": "ignored"} == {
+    assert response.json() | {"task_id": "ignored", "execution_duration": "ignored"} == {
         "task_id": "ignored",
         "status": "completed",
         "selected_model": "reasoning-fallback",
@@ -103,8 +105,12 @@ async def test_create_task_falls_back_to_next_eligible_model():
         "attempted_models": ["reasoning", "reasoning-fallback"],
         "plan": ["generate_response"],
         "response": "Fallback answer",
+        "execution_duration": "ignored",
     }
+    assert isinstance(response.json()["execution_duration"], float)
+    assert response.json()["execution_duration"] >= 0
     assert provider.calls == ["reasoning", "reasoning-fallback"]
+
 
 
 @pytest.mark.asyncio
