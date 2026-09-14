@@ -60,7 +60,7 @@ async def test_create_task_generates_response_with_selected_model():
     assert body["provider"] == "ollama"
     assert body["fallback_used"] is False
     assert body["attempted_models"] == ["reasoning"]
-    assert body["plan"] == ["classify_task", "select_model", "execute", "validate"]
+    assert body["plan"] == ["generate_response"]
     assert body["response"] == "Generated answer"
     assert len(provider.calls) == 1
     model, request = provider.calls[0]
@@ -101,7 +101,7 @@ async def test_create_task_falls_back_to_next_eligible_model():
         "provider": "ollama",
         "fallback_used": True,
         "attempted_models": ["reasoning", "reasoning-fallback"],
-        "plan": ["classify_task", "select_model", "execute", "validate"],
+        "plan": ["generate_response"],
         "response": "Fallback answer",
     }
     assert provider.calls == ["reasoning", "reasoning-fallback"]

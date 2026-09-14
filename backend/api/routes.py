@@ -82,7 +82,7 @@ async def create_task(payload: TaskCreate, request: Request):
         fallback_used=state.fallback_used,
         attempted_models=state.attempted_models,
         plan=state.plan,
-        response=model_response.content,
+        response=state.final_response or model_response.content,
     )
 
 
