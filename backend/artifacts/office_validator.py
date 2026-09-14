@@ -18,12 +18,12 @@ class OfficeArtifactValidator:
 
     def validate(self, artifact: Artifact, *, required_text: list[str] | None = None, render_preview: bool = False) -> ArtifactValidation:
         path = Path(artifact.storage_uri)
-        if artifact.type not in {"docx", "pptx"}:
+        if artifact.type not in {"docx", "pptx", "xlsx"}:
             return ArtifactValidation(
                 artifact_id=artifact.id,
                 valid=False,
                 checks={"supported_type": False},
-                findings=["Artifact type must be docx or pptx."],
+                findings=["Artifact type must be docx, pptx, or xlsx."],
             )
         if not path.is_file():
             return ArtifactValidation(
@@ -79,6 +79,17 @@ class OfficeArtifactValidator:
             document = Document(path)
             text = "\n".join(paragraph.text for paragraph in document.paragraphs)
             return text, len(document.paragraphs)
+
+        if artifact_type == "xlsx":
+            from openpyxl import load_workbook
+            wb = load_workbook(path, read_only=True, data_only=True)
+            cell_texts = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    cell_texts.extend(str(v) for v in row if v is not None)
+            sheet_count = len(wb.worksheets)
+            wb.close()
+            return "\n".join(cell_texts), sheet_count
 
         presentation = Presentation(path)
         slide_text = []

@@ -44,7 +44,7 @@ class ArtifactValidateTool(Tool):
 
         if artifact.type == "pdf":
             validation = PdfArtifactValidator(self.preview_dir).validate(artifact, required_text=required_text)
-        elif artifact.type in {"docx", "pptx"}:
+        elif artifact.type in {"docx", "pptx", "xlsx"}:
             renderer = LibreOfficeRenderer(self.preview_dir) if render_preview else None
             validation = OfficeArtifactValidator(renderer).validate(artifact, required_text=required_text, render_preview=render_preview)
         else:

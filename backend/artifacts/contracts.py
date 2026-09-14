@@ -110,6 +110,32 @@ class PresentationSpec(BaseModel):
     slides: list[SlideSpec] = Field(min_length=1, max_length=30)
 
 
+class ColumnDef(BaseModel):
+    """Definition for a spreadsheet column."""
+
+    key: str = Field(min_length=1)
+    header: str = Field(min_length=1)
+    width: float | None = None
+
+
+class SheetSpec(BaseModel):
+    """Specification for a single worksheet in an Excel workbook."""
+
+    title: str = Field(default="Sheet1", min_length=1, max_length=31)
+    columns: list[ColumnDef] = Field(min_length=1)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    summary_row: bool = False
+
+
+class SpreadsheetSpec(BaseModel):
+    """Structured input for a sovereign, styled XLSX workbook."""
+
+    title: str = Field(min_length=1, max_length=100)
+    sheets: list[SheetSpec] = Field(min_length=1, max_length=10)
+    author: str | None = None
+
+
+
 def artifact_from_path(path: Path, *, artifact_type: str, mime_type: str, task_id: str, metadata: dict[str, Any]) -> Artifact:
     return Artifact(
         type=artifact_type,

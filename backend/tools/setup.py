@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from backend.core.config import Settings, get_settings
-from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
+from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool, SpreadsheetCreateTool
 from backend.artifacts.validation_tool import ArtifactValidateTool
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
 from backend.models.providers import ModelProvider, ModelProviderRegistry, OllamaProvider
@@ -82,6 +82,7 @@ def build_tool_registry(
         DocumentCreateTool(artifact_dir),
         PresentationCreateTool(artifact_dir),
         PdfCreateTool(artifact_dir),
+        SpreadsheetCreateTool(artifact_dir),
         ArtifactValidateTool(cfg.data_dir / "tmp" / "artifact-previews"),
     ):
         registry.register(artifact_tool)
