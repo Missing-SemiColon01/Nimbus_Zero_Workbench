@@ -1,9 +1,12 @@
+from __future__ import annotations
+
+import time
 import uuid
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from backend.agents.state import AgentState
+from backend.agents.state import AgentState, StateValidationError, validate_state
 from backend.models.contracts import ModelRequest, ModelResponse
 from backend.models.providers import ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter
@@ -24,6 +27,8 @@ class AgentGraphState(TypedDict):
     model_response: ModelResponse | None
     required_capabilities: set[str]
     modality: str
+    status: str
+    execution_duration: float | None
 
 
 class AgentRuntime:
@@ -33,31 +38,58 @@ class AgentRuntime:
         self.router = router
         self.providers = providers
         workflow = StateGraph(AgentGraphState)
+        workflow.add_node("validate_input", self._validate_input)
         workflow.add_node("generate_response", self._generate_response)
-        workflow.add_edge(START, "generate_response")
-        workflow.add_edge("generate_response", END)
+        workflow.add_node("validate_output", self._validate_output)
+        workflow.add_edge(START, "validate_input")
+        workflow.add_edge("validate_input", "generate_response")
+        workflow.add_edge("generate_response", "validate_output")
+        workflow.add_edge("validate_output", END)
         self.graph = workflow.compile()
 
-    async def run(self, user_request: str, capabilities: set[str], modality: str = "text") -> tuple[AgentState, ModelResponse]:
-        """Run START -> generate_response -> END for one task."""
-        result = await self.graph.ainvoke(
-            {
-                "task_id": str(uuid.uuid4()),
-                "user_prompt": user_request,
-                "selected_model": None,
-                "messages": [user_request],
-                "final_response": None,
-                "errors": [],
-                "attempted_models": [],
-                "provider": None,
-                "fallback_used": False,
-                "model_response": None,
-                "required_capabilities": capabilities,
-                "modality": modality,
-            }
-        )
-        model_response = result["model_response"]
+    async def run(
+        self,
+        user_request: str,
+        capabilities: set[str],
+        modality: str = "text",
+        task_id: str | None = None,
+    ) -> tuple[AgentState, ModelResponse]:
+        """Run the agent workflow for one task."""
+        start_time = time.perf_counter()
+        resolved_task_id = task_id or str(uuid.uuid4())
+        initial_messages = [user_request] if isinstance(user_request, str) and user_request.strip() else []
+
+        initial_state: AgentGraphState = {
+            "task_id": resolved_task_id,
+            "user_prompt": user_request,
+            "selected_model": None,
+            "messages": initial_messages,
+            "final_response": None,
+            "errors": [],
+            "attempted_models": [],
+            "provider": None,
+            "fallback_used": False,
+            "model_response": None,
+            "required_capabilities": capabilities,
+            "modality": modality,
+            "status": "queued",
+            "execution_duration": None,
+        }
+
+        # Pre-validate input state before invoking workflow
+        validate_state(initial_state, require_model=False)
+
+        result = await self.graph.ainvoke(initial_state)
+        execution_duration = round(time.perf_counter() - start_time, 4)
+
+        model_response = result.get("model_response")
         assert model_response is not None
+
+        status = result.get("status")
+        if not status:
+            is_failure = result.get("provider") is None and bool(result.get("errors"))
+            status = "failed" if is_failure else "completed"
+
         state = AgentState(
             task_id=result["task_id"],
             user_request=result["user_prompt"],
@@ -70,11 +102,22 @@ class AgentRuntime:
             provider=result["provider"],
             fallback_used=result["fallback_used"],
             attempted_models=result["attempted_models"],
-            status="completed",
+            status=status,
+            execution_duration=execution_duration,
         )
         return state, model_response
 
-    async def _generate_response(self, state: AgentGraphState) -> dict:
+    async def _validate_input(self, state: AgentGraphState) -> dict[str, Any]:
+        """Validate input state fields inside the graph workflow and transition to running."""
+        validate_state(state, require_model=False)
+        return {"status": "running"}
+
+    async def _validate_output(self, state: AgentGraphState) -> dict[str, Any]:
+        """Validate output state fields including selected_model."""
+        validate_state(state, require_model=True)
+        return {}
+
+    async def _generate_response(self, state: AgentGraphState) -> dict[str, Any]:
         """Route and generate through the existing provider abstraction only."""
         model_request = ModelRequest(
             prompt=state["user_prompt"],
@@ -87,8 +130,8 @@ class AgentRuntime:
             self.router.select(model_request)
 
         last_error: ProviderError | None = None
-        attempted_models = list(state["attempted_models"])
-        errors = list(state["errors"])
+        attempted_models = list(state.get("attempted_models") or [])
+        errors = list(state.get("errors") or [])
         for model in candidates:
             attempted_models.append(model.id)
             try:
@@ -110,7 +153,30 @@ class AgentRuntime:
                 "final_response": response.content,
                 "errors": errors,
                 "model_response": response,
+                "status": "completed",
             }
 
+        # If all candidates fail:
+        # Capture errors in the errors field and return a predictable failure response
         assert last_error is not None
-        raise last_error
+        predictable_response = f"Model generation failed: {last_error}"
+        failed_model_id = attempted_models[-1] if attempted_models else candidates[0].id
+        fallback_used = len(attempted_models) > 1
+        model_response = ModelResponse(
+            content=predictable_response,
+            model_id=failed_model_id,
+            raw={"error": str(last_error), "errors": errors},
+        )
+        return {
+            "selected_model": failed_model_id,
+            "provider": None,
+            "fallback_used": fallback_used,
+            "attempted_models": attempted_models,
+            "messages": [*state["messages"], predictable_response],
+            "final_response": predictable_response,
+            "errors": errors,
+            "model_response": model_response,
+            "status": "failed",
+        }
+
+

@@ -40,3 +40,5 @@ class TaskResponse(BaseModel):
     attempted_models: list[str]
     plan: list[str]
     response: str
+    execution_duration: float | None = None
+
