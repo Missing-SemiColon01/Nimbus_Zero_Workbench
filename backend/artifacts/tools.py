@@ -86,6 +86,47 @@ class PdfCreateTool(Tool):
         )
 
 
+class SpreadsheetCreateTool(Tool):
+    """Create a local styled XLSX spreadsheet from a SpreadsheetSpec payload."""
+
+    name = "spreadsheet.create"
+    description = "Create a local styled XLSX spreadsheet from structured spreadsheet data."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "sheets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "columns": {"type": "array", "items": {"type": "object"}},
+                        "rows": {"type": "array", "items": {"type": "object"}},
+                        "summary_row": {"type": "boolean"},
+                    },
+                    "required": ["title", "columns"],
+                },
+            },
+        },
+        "required": ["title", "sheets"],
+    }
+
+    def __init__(self, artifact_dir: Path):
+        from backend.artifacts.xlsx_generator import XlsxGenerator
+        self.generator = XlsxGenerator(artifact_dir)
+
+    async def execute(self, arguments: dict[str, Any], context: dict[str, Any]) -> ToolResult:
+        from backend.artifacts.contracts import SpreadsheetSpec
+        return _generate(
+            generator=self.generator,
+            spec_type=SpreadsheetSpec,
+            arguments=arguments,
+            context=context,
+        )
+
+
+
 def _generate(*, generator: Any, spec_type: Any, arguments: dict[str, Any], context: dict[str, Any]) -> ToolResult:
     """Keep validation and filesystem failures inside the normal tool-result contract."""
     task_id = context.get("task_id")
