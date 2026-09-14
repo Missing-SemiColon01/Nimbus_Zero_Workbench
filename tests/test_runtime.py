@@ -262,3 +262,116 @@ def test_validate_state_checks_selected_model_when_required():
 
     validate_state({**valid_initial, "selected_model": "reasoning"}, require_model=True)
 
+
+class SlowProvider(ModelProvider):
+    def __init__(self, delay: float = 0.2):
+        self.delay = delay
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        await asyncio.sleep(self.delay)
+        return ModelResponse(content="slow response", model_id=model.id)
+
+
+def test_runtime_timeout_returns_predictable_failure(tmp_path: Path):
+    provider = SlowProvider(delay=0.1)
+    rt = runtime(tmp_path, provider)
+
+    state, response = asyncio.run(rt.run("hello", {"reasoning"}, timeout=0.01))
+
+    assert state.status == "failed"
+    assert "timed out" in state.final_response
+    assert any("timed out" in err for err in state.errors)
+    assert response.content == state.final_response
+    assert isinstance(state.execution_duration, float)
+
+
+class CountedFailingProvider(ModelProvider):
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.calls.append(model.id)
+        raise ProviderError(f"Failure in {model.id}")
+
+
+def test_runtime_provider_retry_limit(tmp_path: Path):
+    config = tmp_path / "models.yaml"
+    config.write_text(
+        """models:
+  - id: m1
+    runtime: fake
+    model: m1
+    capabilities: [reasoning]
+    modalities: [text]
+    priority: 30
+  - id: m2
+    runtime: fake
+    model: m2
+    capabilities: [reasoning]
+    modalities: [text]
+    priority: 20
+  - id: m3
+    runtime: fake
+    model: m3
+    capabilities: [reasoning]
+    modalities: [text]
+    priority: 10
+"""
+    )
+    provider = CountedFailingProvider()
+    rt = AgentRuntime(ModelRouter(ModelRegistry(config)), ModelProviderRegistry({"fake": provider}))
+
+    # max_retries = 1: 1 initial attempt (m1) + 1 retry (m2). m3 must NOT be attempted!
+    state, response = asyncio.run(rt.run("hello", {"reasoning"}, max_retries=1))
+
+    assert state.status == "failed"
+    assert provider.calls == ["m1", "m2"]
+    assert any("Provider retry limit (1) reached" in err for err in state.errors)
+    assert "Model generation failed" in state.final_response
+
+
+def test_runtime_step_limit_exceeded(tmp_path: Path):
+    provider = SuccessProvider()
+    rt = runtime(tmp_path, provider)
+
+    # Workflow has 3 nodes (validate_input -> generate_response -> validate_output)
+    # If max_steps is set to 1, validate_input runs (step 1), but generate_response (step 2) exceeds max_steps!
+    state, response = asyncio.run(rt.run("hello", {"reasoning"}, max_steps=1))
+
+    assert state.status == "failed"
+    assert any("Maximum workflow steps" in err for err in state.errors)
+    assert "Maximum workflow steps" in state.final_response
+
+
+def test_runtime_infinite_loop_protection(tmp_path: Path):
+    from backend.agents.runtime import detect_cycle
+    from backend.agents.state import InfiniteLoopError
+
+    # Test cycle detection helper
+    assert detect_cycle(["a", "b", "a", "b", "a", "b"], min_repetitions=3) is True
+    assert detect_cycle(["a", "a", "a"], min_repetitions=3) is True
+    assert detect_cycle(["validate_input", "generate_response", "validate_output"]) is False
+
+    # Test runtime triggers InfiniteLoopError on repeating cycle
+    provider = SuccessProvider()
+    rt = runtime(tmp_path, provider)
+
+    looping_state = {
+        "step_count": 5,
+        "max_steps": 20,
+        "node_history": ["node_a", "node_b", "node_a", "node_b", "node_a"],
+    }
+    with pytest.raises(InfiniteLoopError, match="Infinite loop detected"):
+        rt._track_step(looping_state, "node_b")
+
+    # Also test single node repeated 3 times
+    single_loop_state = {
+        "step_count": 2,
+        "max_steps": 20,
+        "node_history": ["node_a", "node_a"],
+    }
+    with pytest.raises(InfiniteLoopError, match="Infinite loop detected"):
+        rt._track_step(single_loop_state, "node_a")
+
+
+

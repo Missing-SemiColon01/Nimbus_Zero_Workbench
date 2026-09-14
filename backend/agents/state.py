@@ -12,6 +12,25 @@ class StateValidationError(ValueError):
     pass
 
 
+class WorkflowTimeoutError(RuntimeError):
+    """Raised or captured when workflow execution exceeds the configured timeout."""
+
+    pass
+
+
+class StepLimitExceededError(RuntimeError):
+    """Raised or captured when workflow execution exceeds maximum allowed steps."""
+
+    pass
+
+
+class InfiniteLoopError(RuntimeError):
+    """Raised or captured when an infinite loop is detected in the workflow."""
+
+    pass
+
+
+
 def validate_state(
     state: Mapping[str, Any] | "AgentState",
     require_model: bool = False,
@@ -92,6 +111,8 @@ class AgentState:
     approval_required: bool = False
     status: str = "queued"
     execution_duration: float | None = None
+    step_count: int = 0
+
 
 
     def __post_init__(self) -> None:
