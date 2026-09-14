@@ -17,14 +17,15 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.registry = ModelRegistry(settings.models_config)
     providers = ModelProviderRegistry({"ollama": OllamaProvider(settings.ollama_base_url)})
-    app.state.runtime = AgentRuntime(
-        ModelRouter(app.state.registry),
-        providers,
-    )
     app.state.tools = build_tool_registry(
         settings=settings,
         model_registry=app.state.registry,
         provider_registry=providers,
+    )
+    app.state.runtime = AgentRuntime(
+        ModelRouter(app.state.registry),
+        providers,
+        tools=app.state.tools,
     )
     yield
 
