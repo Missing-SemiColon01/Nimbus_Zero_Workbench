@@ -8,6 +8,7 @@ from backend.artifacts.pdf_validator import PdfArtifactValidator
 from backend.artifacts.office_validator import OfficeArtifactValidator
 from backend.artifacts.office_renderer import LibreOfficeRenderer
 from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
+from backend.artifacts.validation_tool import ArtifactValidateTool
 
 __all__ = [
     "ApprovalNoteSpec",
@@ -25,4 +26,5 @@ __all__ = [
     "DocumentCreateTool",
     "PdfCreateTool",
     "PresentationCreateTool",
+    "ArtifactValidateTool",
 ]

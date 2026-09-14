@@ -8,4 +8,5 @@ tools:
   - document.create
   - presentation.create
   - pdf.create
+  - artifact.validate
   - sandbox.execute

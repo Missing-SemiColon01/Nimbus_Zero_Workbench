@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 
 from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
+from backend.artifacts.validation_tool import ArtifactValidateTool
 from backend.security.policy import PolicyDecision, PolicyEngine
 
 
@@ -46,3 +47,27 @@ def test_pdf_tool_generates_local_artifact_and_requires_approval(tmp_path: Path)
     assert result.success
     assert Path(result.artifacts[0]).suffix == ".pdf"
     assert PolicyEngine().evaluate("pdf.create") == PolicyDecision.REQUIRE_APPROVAL
+
+
+def test_artifact_validation_tool_validates_created_pdf(tmp_path: Path):
+    created = asyncio.run(
+        PdfCreateTool(tmp_path).execute(
+            {
+                "subject": "Pump repair approval",
+                "purpose": "Request approval for repair work.",
+                "recommendation": "Repair the pump during the next shutdown.",
+                "requested_approval": "Approve the repair work order.",
+            },
+            {"task_id": "task-42"},
+        )
+    )
+    result = asyncio.run(
+        ArtifactValidateTool(tmp_path / "previews").execute(
+            {"artifact": created.output, "required_text": ["Pump repair approval"]},
+            {},
+        )
+    )
+
+    assert result.success
+    assert result.output["valid"] is True
+    assert Path(result.artifacts[0]).suffix == ".png"
