@@ -51,6 +51,11 @@ def test_runtime_falls_back_after_provider_error(tmp_path: Path):
     assert state.provider == "fake"
     assert state.fallback_used is True
     assert state.attempted_models == ["primary", "backup"]
+    assert state.user_prompt == "hello"
+    assert state.final_response == "fallback response"
+    assert state.messages == ["hello", "fallback response"]
+    assert state.errors == ["network unavailable"]
+    assert state.plan == ["generate_response"]
     assert provider.calls == ["primary", "backup"]
 
 
