@@ -16,6 +16,18 @@ class DocumentCreateTool(Tool):
     """Create a local approval-note DOCX from an ApprovalNoteSpec payload."""
 
     name = "document.create"
+    description = "Create a local DOCX approval note from structured approval content."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "subject": {"type": "string"},
+            "purpose": {"type": "string"},
+            "recommendation": {"type": "string"},
+            "requested_approval": {"type": "string"},
+            "findings": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["subject", "purpose", "recommendation", "requested_approval"],
+    }
 
     def __init__(self, artifact_dir: Path):
         self.generator = DocxGenerator(artifact_dir)
@@ -33,6 +45,15 @@ class PresentationCreateTool(Tool):
     """Create a local editable PPTX from a PresentationSpec payload."""
 
     name = "presentation.create"
+    description = "Create a local editable PPTX presentation from a structured presentation specification."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "slides": {"type": "array", "items": {"type": "object"}},
+        },
+        "required": ["title", "slides"],
+    }
 
     def __init__(self, artifact_dir: Path):
         self.generator = PptxGenerator(artifact_dir)
@@ -50,6 +71,8 @@ class PdfCreateTool(Tool):
     """Create a local approval-note PDF from an ApprovalNoteSpec payload."""
 
     name = "pdf.create"
+    description = "Create a local PDF approval note from structured approval content."
+    parameters = DocumentCreateTool.parameters
 
     def __init__(self, artifact_dir: Path):
         self.generator = PdfApprovalNoteGenerator(artifact_dir)
