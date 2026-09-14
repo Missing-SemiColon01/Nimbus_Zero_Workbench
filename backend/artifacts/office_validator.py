@@ -1,17 +1,22 @@
 """Local structural validation for DOCX and PPTX deliverables."""
 
+import subprocess
 from pathlib import Path
 
 from docx import Document
 from pptx import Presentation
 
 from backend.artifacts.contracts import Artifact, ArtifactValidation
+from backend.artifacts.office_renderer import LibreOfficeRenderer
 
 
 class OfficeArtifactValidator:
     """Verify that editable Office artifacts open and contain expected content."""
 
-    def validate(self, artifact: Artifact, *, required_text: list[str] | None = None) -> ArtifactValidation:
+    def __init__(self, renderer: LibreOfficeRenderer | None = None):
+        self.renderer = renderer
+
+    def validate(self, artifact: Artifact, *, required_text: list[str] | None = None, render_preview: bool = False) -> ArtifactValidation:
         path = Path(artifact.storage_uri)
         if artifact.type not in {"docx", "pptx"}:
             return ArtifactValidation(
@@ -48,11 +53,24 @@ class OfficeArtifactValidator:
             findings.append("Artifact has no readable content.")
         if not checks["required_text_present"]:
             findings.append("Artifact is missing expected content.")
+        preview_path = None
+        if render_preview:
+            if not self.renderer:
+                checks["preview_rendered"] = False
+                findings.append("LibreOffice renderer was not configured.")
+            else:
+                try:
+                    _, preview_path = self.renderer.render(path, preview_name=artifact.id)
+                    checks["preview_rendered"] = True
+                except (FileNotFoundError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                    checks["preview_rendered"] = False
+                    findings.append(f"Visual preview could not be rendered: {error}")
         return ArtifactValidation(
             artifact_id=artifact.id,
             valid=all(checks.values()),
             checks=checks,
             findings=findings,
+            preview_path=str(preview_path.resolve()) if preview_path else None,
         )
 
     @staticmethod

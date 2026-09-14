@@ -6,6 +6,7 @@ from backend.artifacts.pptx_generator import PptxGenerator
 from backend.artifacts.pdf_generator import PdfApprovalNoteGenerator
 from backend.artifacts.pdf_validator import PdfArtifactValidator
 from backend.artifacts.office_validator import OfficeArtifactValidator
+from backend.artifacts.office_renderer import LibreOfficeRenderer
 from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "PdfApprovalNoteGenerator",
     "PdfArtifactValidator",
     "OfficeArtifactValidator",
+    "LibreOfficeRenderer",
     "DocumentCreateTool",
     "PdfCreateTool",
     "PresentationCreateTool",

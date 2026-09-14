@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 from docx import Document
@@ -10,6 +11,7 @@ from backend.artifacts import (
     PdfApprovalNoteGenerator,
     PdfArtifactValidator,
     OfficeArtifactValidator,
+    LibreOfficeRenderer,
     PptxGenerator,
     PresentationSpec,
     SlideLayout,
@@ -117,3 +119,28 @@ def test_office_validator_checks_docx_and_pptx_content(tmp_path: Path):
 
     assert validator.validate(docx, required_text=["Pump P-101 repair approval", "Approval Requested"]).valid
     assert validator.validate(pptx, required_text=["Executive summary", "Action is required"]).valid
+
+
+def test_libreoffice_renderer_converts_and_previews_docx(tmp_path: Path, monkeypatch):
+    artifact = DocxGenerator(tmp_path).generate(
+        ApprovalNoteSpec(subject="Pump approval", purpose="Purpose", recommendation="Repair.", requested_approval="Approve."),
+        task_id="task-123",
+    )
+    soffice = tmp_path / "soffice.exe"
+    soffice.touch()
+
+    def fake_run(command, **_kwargs):
+        output_dir = Path(command[command.index("--outdir") + 1])
+        pdf = fitz.open()
+        page = pdf.new_page()
+        page.insert_text((72, 72), "Rendered approval note")
+        pdf.save(output_dir / "Pump-approval.pdf")
+        pdf.close()
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("backend.artifacts.office_renderer.subprocess.run", fake_run)
+    renderer = LibreOfficeRenderer(tmp_path / "renders", soffice_path=soffice)
+    pdf_path, preview_path = renderer.render(Path(artifact.storage_uri), preview_name=artifact.id)
+
+    assert pdf_path.exists()
+    assert preview_path.exists()
