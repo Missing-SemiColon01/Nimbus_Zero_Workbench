@@ -5,10 +5,12 @@ import pytest
 
 from backend.agents.runtime import AgentRuntime
 from backend.agents.state import StateValidationError, validate_state
-from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse
+from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse, ToolCall
 from backend.models.providers import ModelProvider, ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.registry import ModelRegistry
 from backend.models.router import ModelRouter
+from backend.tools.contracts import Tool, ToolResult
+from backend.tools.registry import ToolRegistry
 
 
 class FailingOverProvider(ModelProvider):
@@ -373,5 +375,118 @@ def test_runtime_infinite_loop_protection(tmp_path: Path):
     with pytest.raises(InfiniteLoopError, match="Infinite loop detected"):
         rt._track_step(single_loop_state, "node_a")
 
+
+class SequencedProvider(ModelProvider):
+    def __init__(self, responses: list[ModelResponse]):
+        self.responses = responses
+        self.requests: list[ModelRequest] = []
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return self.responses.pop(0)
+
+
+class MockSearchTool(Tool):
+    name = "mock.search"
+    description = "Search mock data."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+        },
+        "required": ["query"],
+    }
+
+    def __init__(self, result: ToolResult):
+        self.result = result
+        self.calls: list[dict] = []
+
+    async def execute(self, arguments: dict, context: dict) -> ToolResult:
+        self.calls.append({"arguments": arguments, "context": context})
+        return self.result
+
+
+def runtime_with_tools(tmp_path: Path, provider: ModelProvider, tool: Tool) -> AgentRuntime:
+    config = tmp_path / "models.yaml"
+    config.write_text(
+        """models:
+  - id: primary
+    runtime: fake
+    model: primary
+    capabilities: [reasoning, tool_calling]
+    modalities: [text]
+    priority: 10
+"""
+    )
+    registry = ToolRegistry()
+    registry.register(tool)
+    return AgentRuntime(
+        ModelRouter(ModelRegistry(config)),
+        ModelProviderRegistry({"fake": provider}),
+        tools=registry,
+    )
+
+
+def test_runtime_direct_response_does_not_execute_tools(tmp_path: Path):
+    provider = SequencedProvider([ModelResponse(content="direct answer", model_id="primary")])
+    tool = MockSearchTool(ToolResult(success=True, output={"unused": True}))
+    rt = runtime_with_tools(tmp_path, provider, tool)
+
+    state, response = asyncio.run(rt.run("answer plainly", {"reasoning"}))
+
+    assert response.content == "direct answer"
+    assert state.final_response == "direct answer"
+    assert state.tool_results == []
+    assert tool.calls == []
+    assert len(provider.requests) == 1
+    assert provider.requests[0].tools[0]["name"] == "mock.search"
+
+
+def test_runtime_successful_tool_call_returns_result_to_model(tmp_path: Path):
+    provider = SequencedProvider(
+        [
+            ModelResponse(
+                content="need search",
+                model_id="primary",
+                tool_calls=[ToolCall(name="mock.search", arguments={"query": "valve"})],
+            ),
+            ModelResponse(content="final answer from search result", model_id="primary"),
+        ]
+    )
+    tool = MockSearchTool(ToolResult(success=True, output={"answer": "valve is safe"}))
+    rt = runtime_with_tools(tmp_path, provider, tool)
+
+    state, response = asyncio.run(rt.run("check valve", {"reasoning", "tool_calling"}))
+
+    assert response.content == "final answer from search result"
+    assert state.final_response == "final answer from search result"
+    assert len(tool.calls) == 1
+    assert tool.calls[0]["arguments"] == {"query": "valve"}
+    assert state.tool_results[0]["tool"] == "mock.search"
+    assert state.tool_results[0]["success"] is True
+    assert provider.requests[1].tool_results[0].output == {"answer": "valve is safe"}
+    assert "Tool results:" in provider.requests[1].prompt
+
+
+def test_runtime_tool_failure_returns_error_to_model(tmp_path: Path):
+    provider = SequencedProvider(
+        [
+            ModelResponse(
+                content="need search",
+                model_id="primary",
+                tool_calls=[ToolCall(name="mock.search", arguments={"query": "missing"})],
+            ),
+            ModelResponse(content="final answer explaining tool failure", model_id="primary"),
+        ]
+    )
+    tool = MockSearchTool(ToolResult(success=False, output=None, error="index unavailable"))
+    rt = runtime_with_tools(tmp_path, provider, tool)
+
+    state, response = asyncio.run(rt.run("check missing doc", {"reasoning", "tool_calling"}))
+
+    assert response.content == "final answer explaining tool failure"
+    assert state.tool_results[0]["success"] is False
+    assert state.tool_results[0]["error"] == "index unavailable"
+    assert provider.requests[1].tool_results[0].error == "index unavailable"
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import json
 import time
 import uuid
 from typing import Any, TypedDict
@@ -16,9 +17,10 @@ from backend.agents.state import (
     WorkflowTimeoutError,
     validate_state,
 )
-from backend.models.contracts import ModelRequest, ModelResponse
+from backend.models.contracts import ModelRequest, ModelResponse, ToolCall, ToolExecutionResult
 from backend.models.providers import ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter
+from backend.tools.registry import ToolRegistry
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,7 @@ class RuntimeConfig:
     timeout: float = 60.0
     max_retries: int = 2
     max_steps: int = 15
+    max_tool_rounds: int = 3
 
 
 def detect_cycle(history: list[str], min_repetitions: int = 3) -> bool:
@@ -66,6 +69,7 @@ class AgentGraphState(TypedDict):
     node_history: list[str]
     max_retries: int
     max_steps: int
+    tool_results: list[ToolExecutionResult]
 
 
 class AgentRuntime:
@@ -75,10 +79,12 @@ class AgentRuntime:
         self,
         router: ModelRouter,
         providers: ModelProviderRegistry,
+        tools: ToolRegistry | None = None,
         config: RuntimeConfig | None = None,
     ):
         self.router = router
         self.providers = providers
+        self.tools = tools
         self.config = config or RuntimeConfig()
 
         workflow = StateGraph(AgentGraphState)
@@ -129,6 +135,7 @@ class AgentRuntime:
             "node_history": [],
             "max_retries": effective_max_retries,
             "max_steps": effective_max_steps,
+            "tool_results": [],
         }
 
         # Pre-validate input state before invoking workflow
@@ -250,6 +257,22 @@ class AgentRuntime:
             status=status,
             execution_duration=execution_duration,
             step_count=result.get("step_count", 0),
+            tool_results=[
+                {
+                    "tool": tool_result.name,
+                    "success": tool_result.success,
+                    "output": tool_result.output,
+                    "error": tool_result.error,
+                    "artifacts": tool_result.artifacts,
+                    "id": tool_result.id,
+                }
+                for tool_result in result.get("tool_results", [])
+            ],
+            artifacts=[
+                artifact
+                for tool_result in result.get("tool_results", [])
+                for artifact in tool_result.artifacts
+            ],
         )
         return state, model_response
 
@@ -293,6 +316,8 @@ class AgentRuntime:
             prompt=state["user_prompt"],
             required_capabilities=state["required_capabilities"],
             required_modality=state["modality"],
+            tools=self._tool_schemas(),
+            tool_results=state.get("tool_results", []),
         )
         candidates = self.router.candidates(model_request)
         if not candidates:
@@ -314,7 +339,7 @@ class AgentRuntime:
 
             attempted_models.append(model.id)
             try:
-                response = await self.providers.generate(model, model_request)
+                response, tool_results = await self._generate_with_tools(model, model_request, state)
             except ProviderRequestError:
                 # A malformed request must not be retried against another model.
                 raise
@@ -332,6 +357,7 @@ class AgentRuntime:
                 "final_response": response.content,
                 "errors": errors,
                 "model_response": response,
+                "tool_results": tool_results,
                 "status": "completed",
                 "step_count": step_count,
                 "node_history": node_history,
@@ -362,5 +388,185 @@ class AgentRuntime:
             "node_history": node_history,
         }
 
+    async def _generate_with_tools(
+        self,
+        model: Any,
+        initial_request: ModelRequest,
+        state: AgentGraphState,
+    ) -> tuple[ModelResponse, list[ToolExecutionResult]]:
+        request = initial_request
+        tool_results = list(state.get("tool_results", []))
+        response = await self.providers.generate(model, request)
+
+        for _ in range(self.config.max_tool_rounds):
+            tool_calls = self._detect_tool_calls(response)
+            if not tool_calls:
+                return response, tool_results
+
+            round_results = [await self._execute_tool_call(tool_call, state) for tool_call in tool_calls]
+            tool_results.extend(round_results)
+            request = ModelRequest(
+                prompt=self._prompt_with_tool_results(state["user_prompt"], response, round_results),
+                required_capabilities=initial_request.required_capabilities,
+                required_modality=initial_request.required_modality,
+                images=initial_request.images,
+                tools=initial_request.tools,
+                tool_results=tool_results,
+            )
+            response = await self.providers.generate(model, request)
+
+        raise ProviderError(f"Maximum tool rounds ({self.config.max_tool_rounds}) exceeded")
+
+    def _detect_tool_calls(self, response: ModelResponse) -> list[ToolCall]:
+        if response.tool_calls:
+            return response.tool_calls
+
+        raw_tool_calls = response.raw.get("tool_calls")
+        if isinstance(raw_tool_calls, list):
+            return [call for item in raw_tool_calls if (call := self._coerce_tool_call(item))]
+
+        stripped = response.content.strip()
+        if not stripped:
+            return []
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(payload, dict) and "tool_calls" in payload and isinstance(payload["tool_calls"], list):
+            return [call for item in payload["tool_calls"] if (call := self._coerce_tool_call(item))]
+        if isinstance(payload, dict) and ("tool" in payload or "name" in payload):
+            call = self._coerce_tool_call(payload)
+            return [call] if call else []
+        return []
+
+    def _coerce_tool_call(self, item: Any) -> ToolCall | None:
+        if isinstance(item, ToolCall):
+            return item
+        if not isinstance(item, dict):
+            return None
+        name = item.get("name") or item.get("tool")
+        arguments = item.get("arguments") or item.get("args") or {}
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(name, str) or not name.strip() or not isinstance(arguments, dict):
+            return None
+        call_id = item.get("id") if isinstance(item.get("id"), str) else None
+        return ToolCall(name=name.strip(), arguments=arguments, id=call_id)
+
+    async def _execute_tool_call(self, tool_call: ToolCall, state: AgentGraphState) -> ToolExecutionResult:
+        if self.tools is None:
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error="No tool registry is configured for this runtime.",
+                id=tool_call.id,
+            )
+        try:
+            tool = self.tools.get(tool_call.name)
+        except KeyError:
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error=f"Tool '{tool_call.name}' is not registered.",
+                id=tool_call.id,
+            )
+
+        validation_error = self._validate_tool_arguments(tool_call.arguments, getattr(tool, "parameters", {}))
+        if validation_error:
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error=validation_error,
+                id=tool_call.id,
+            )
+
+        result = await tool.execute(
+            tool_call.arguments,
+            context={
+                "task_id": state["task_id"],
+                "tool_results": state.get("tool_results", []),
+                "retrieved_context": [],
+            },
+        )
+        return ToolExecutionResult(
+            name=tool_call.name,
+            success=result.success,
+            output=result.output,
+            error=result.error,
+            artifacts=result.artifacts,
+            id=tool_call.id,
+        )
+
+    def _validate_tool_arguments(self, arguments: dict[str, Any], schema: dict[str, Any]) -> str | None:
+        required = schema.get("required", []) if isinstance(schema, dict) else []
+        for field in required:
+            if field not in arguments:
+                return f"Tool argument '{field}' is required."
+
+        properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        for field, value in arguments.items():
+            expected = properties.get(field, {}).get("type") if isinstance(properties.get(field), dict) else None
+            if expected and not self._matches_json_type(value, expected):
+                return f"Tool argument '{field}' must be of type {expected}."
+        return None
+
+    def _matches_json_type(self, value: Any, expected: str) -> bool:
+        if expected == "string":
+            return isinstance(value, str)
+        if expected == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if expected == "number":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if expected == "boolean":
+            return isinstance(value, bool)
+        if expected == "array":
+            return isinstance(value, list)
+        if expected == "object":
+            return isinstance(value, dict)
+        return True
+
+    def _tool_schemas(self) -> list[dict[str, Any]]:
+        if self.tools is None:
+            return []
+        return [
+            {
+                "name": tool.name,
+                "description": getattr(tool, "description", ""),
+                "parameters": getattr(tool, "parameters", {}),
+            }
+            for tool in (self.tools.get(name) for name in self.tools.names())
+        ]
+
+    def _prompt_with_tool_results(
+        self,
+        original_prompt: str,
+        response: ModelResponse,
+        round_results: list[ToolExecutionResult],
+    ) -> str:
+        payload = [
+            {
+                "tool": result.name,
+                "success": result.success,
+                "output": result.output,
+                "error": result.error,
+                "artifacts": result.artifacts,
+                "id": result.id,
+            }
+            for result in round_results
+        ]
+        return (
+            f"{original_prompt}\n\n"
+            f"Assistant requested tool calls: {response.content}\n\n"
+            "Tool results:\n"
+            f"{json.dumps(payload, default=str)}\n\n"
+            "Use the tool results above to produce the final answer. "
+            "If a tool failed, explain the failure clearly."
+        )
 
 
