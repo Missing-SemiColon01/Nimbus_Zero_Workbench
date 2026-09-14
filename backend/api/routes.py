@@ -1,13 +1,16 @@
+from datetime import datetime, timezone
 import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
 from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import NoCompatibleModelError
+from backend.schemas.artifacts import ArtifactInfo
 from backend.schemas.knowledge import (
     IngestRequest,
     IngestResponse,
@@ -177,3 +180,89 @@ async def search_knowledge(payload: KnowledgeSearchRequest, request: Request):
         total_results=len(hits),
         results=hits,
     )
+
+
+# -- Artifacts API (Day 3) ----------------------------------------------------
+
+MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".png": "image/png",
+}
+
+
+def _safe_resolve(base_dir: Path, requested_filename: str) -> Path:
+    """Resolve requested_filename inside base_dir and protect against path traversal."""
+    resolved_base = base_dir.resolve()
+    target_path = (resolved_base / requested_filename).resolve()
+    if not target_path.is_file() or not target_path.is_relative_to(resolved_base):
+        raise HTTPException(status_code=404, detail=f"File not found: {requested_filename}")
+    return target_path
+
+
+@router.get("/artifacts", response_model=list[ArtifactInfo])
+async def list_artifacts(request: Request):
+    """List all locally generated deliverables stored in data/artifacts."""
+    settings = request.app.state.settings
+    artifacts_dir: Path = settings.data_dir / "artifacts"
+    previews_dir: Path = settings.data_dir / "tmp" / "artifact-previews"
+
+    if not artifacts_dir.exists():
+        return []
+
+    items: list[ArtifactInfo] = []
+    for file_path in artifacts_dir.iterdir():
+        if file_path.is_file():
+            ext = file_path.suffix.lstrip(".").lower()
+            stat = file_path.stat()
+            preview_url = None
+            if previews_dir.exists():
+                preview_candidate = previews_dir / f"{file_path.stem}-page-1.png"
+                if preview_candidate.exists():
+                    preview_url = f"/api/v1/artifacts/previews/{preview_candidate.name}"
+
+            items.append(
+                ArtifactInfo(
+                    filename=file_path.name,
+                    file_type=ext,
+                    size_bytes=stat.st_size,
+                    download_url=f"/api/v1/artifacts/{file_path.name}/download",
+                    preview_url=preview_url,
+                    modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                )
+            )
+
+    items.sort(key=lambda item: item.modified_at, reverse=True)
+    return items
+
+
+@router.get("/artifacts/{filename}/download")
+async def download_artifact(filename: str, request: Request):
+    """Download a locally generated artifact with path traversal protection."""
+    settings = request.app.state.settings
+    artifacts_dir: Path = settings.data_dir / "artifacts"
+    target_path = _safe_resolve(artifacts_dir, filename)
+
+    media_type = MIME_TYPES.get(target_path.suffix.lower(), "application/octet-stream")
+    return FileResponse(
+        path=str(target_path),
+        filename=target_path.name,
+        media_type=media_type,
+    )
+
+
+@router.get("/artifacts/previews/{preview_name}")
+async def get_artifact_preview(preview_name: str, request: Request):
+    """Serve a locally generated PNG preview thumbnail for an artifact."""
+    settings = request.app.state.settings
+    previews_dir: Path = settings.data_dir / "tmp" / "artifact-previews"
+    target_path = _safe_resolve(previews_dir, preview_name)
+
+    return FileResponse(
+        path=str(target_path),
+        filename=target_path.name,
+        media_type="image/png",
+    )
+
