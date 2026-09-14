@@ -23,6 +23,16 @@ class Artifact(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class ArtifactValidation(BaseModel):
+    """Local validation result for a generated deliverable."""
+
+    artifact_id: str | None = None
+    valid: bool
+    checks: dict[str, bool] = Field(default_factory=dict)
+    findings: list[str] = Field(default_factory=list)
+    preview_path: str | None = None
+
+
 class ApprovalNoteSpec(BaseModel):
     """Structured input for a professional, traceable approval-note DOCX."""
 

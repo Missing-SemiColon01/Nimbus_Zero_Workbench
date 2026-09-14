@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from backend.core.config import Settings, get_settings
+from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
 from backend.models.providers import ModelProvider, ModelProviderRegistry, OllamaProvider
 from backend.models.registry import ModelRegistry
@@ -73,5 +74,15 @@ def build_tool_registry(
     )
     registry.register(vision_tool)
     logger.info("Registered tool: '%s'", vision_tool.name)
+
+    # 3. Register local artifact-generation tools. These only write inside data/artifacts.
+    artifact_dir = cfg.data_dir / "artifacts"
+    for artifact_tool in (
+        DocumentCreateTool(artifact_dir),
+        PresentationCreateTool(artifact_dir),
+        PdfCreateTool(artifact_dir),
+    ):
+        registry.register(artifact_tool)
+        logger.info("Registered tool: '%s'", artifact_tool.name)
 
     return registry
