@@ -21,6 +21,7 @@ from backend.tools.registry import ToolRegistry
 from backend.tools.setup import build_tool_registry
 from backend.tools.vision_tool import VisionAnalyzeTool
 from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
+from backend.artifacts.validation_tool import ArtifactValidateTool
 
 
 class TestBuildToolRegistry:
@@ -39,7 +40,7 @@ class TestBuildToolRegistry:
         names = registry.names()
         assert "rag.search" in names
         assert "vision.analyze" in names
-        assert {"document.create", "presentation.create", "pdf.create"}.issubset(names)
+        assert {"document.create", "presentation.create", "pdf.create", "artifact.validate"}.issubset(names)
 
         # Verify tool instances
         rag_tool = registry.get("rag.search")
@@ -53,6 +54,7 @@ class TestBuildToolRegistry:
         assert isinstance(registry.get("document.create"), DocumentCreateTool)
         assert isinstance(registry.get("presentation.create"), PresentationCreateTool)
         assert isinstance(registry.get("pdf.create"), PdfCreateTool)
+        assert isinstance(registry.get("artifact.validate"), ArtifactValidateTool)
 
     def test_tool_instances_conform_to_tool_contract(self):
         mock_retriever = MagicMock()
@@ -81,4 +83,4 @@ class TestFastAPILifespanWiring:
             assert isinstance(tools, ToolRegistry)
             assert "rag.search" in tools.names()
             assert "vision.analyze" in tools.names()
-            assert {"document.create", "presentation.create", "pdf.create"}.issubset(tools.names())
+            assert {"document.create", "presentation.create", "pdf.create", "artifact.validate"}.issubset(tools.names())
