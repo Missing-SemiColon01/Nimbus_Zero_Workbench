@@ -74,6 +74,10 @@ async def create_task(payload: TaskCreate, request: Request):
         raise HTTPException(status_code=422, detail="Model generation request is invalid") from error
     except ProviderError as error:
         raise HTTPException(status_code=502, detail="Model generation failed") from error
+
+    if state.status == "failed":
+        raise HTTPException(status_code=502, detail="Model generation failed")
+
     return TaskResponse(
         task_id=state.task_id,
         status=state.status,
