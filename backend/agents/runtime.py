@@ -20,12 +20,14 @@ from backend.agents.state import (
 from backend.models.contracts import ModelRequest, ModelResponse, ToolCall, ToolExecutionResult
 from backend.models.providers import ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter
+from backend.tools.contracts import ToolResult
 from backend.tools.registry import ToolRegistry
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
     timeout: float = 60.0
+    tool_timeout: float = 30.0
     max_retries: int = 2
     max_steps: int = 15
     max_tool_rounds: int = 3
@@ -486,20 +488,63 @@ class AgentRuntime:
                 id=tool_call.id,
             )
 
-        result = await tool.execute(
-            tool_call.arguments,
-            context={
+        try:
+            context = {
                 "task_id": state["task_id"],
                 "tool_results": state.get("tool_results", []),
                 "retrieved_context": [],
-            },
-        )
+            }
+            if self.config.tool_timeout > 0:
+                async with asyncio.timeout(self.config.tool_timeout):
+                    result = await tool.execute(tool_call.arguments, context=context)
+            else:
+                result = await tool.execute(tool_call.arguments, context=context)
+        except (TimeoutError, asyncio.TimeoutError):
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error=f"Tool '{tool_call.name}' timed out after {self.config.tool_timeout}s.",
+                id=tool_call.id,
+            )
+        except Exception as error:
+            detail = str(error) or type(error).__name__
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error=f"Tool '{tool_call.name}' execution failed: {detail}",
+                id=tool_call.id,
+            )
+
+        return self._normalize_tool_result(tool_call, result)
+
+    def _normalize_tool_result(self, tool_call: ToolCall, result: Any) -> ToolExecutionResult:
+        """Convert a tool return value into the result contract used by models."""
+        if not isinstance(result, ToolResult):
+            return self._invalid_tool_result(tool_call, "expected a ToolResult instance")
+        if not isinstance(result.success, bool):
+            return self._invalid_tool_result(tool_call, "field 'success' must be a boolean")
+        if result.error is not None and not isinstance(result.error, str):
+            return self._invalid_tool_result(tool_call, "field 'error' must be a string or null")
+        if not isinstance(result.artifacts, list) or any(not isinstance(item, str) for item in result.artifacts):
+            return self._invalid_tool_result(tool_call, "field 'artifacts' must be a list of strings")
+
         return ToolExecutionResult(
             name=tool_call.name,
             success=result.success,
             output=result.output,
             error=result.error,
             artifacts=result.artifacts,
+            id=tool_call.id,
+        )
+
+    def _invalid_tool_result(self, tool_call: ToolCall, reason: str) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            name=tool_call.name,
+            success=False,
+            output=None,
+            error=f"Tool '{tool_call.name}' returned an invalid result: {reason}.",
             id=tool_call.id,
         )
 
@@ -568,5 +613,3 @@ class AgentRuntime:
             "Use the tool results above to produce the final answer. "
             "If a tool failed, explain the failure clearly."
         )
-
-

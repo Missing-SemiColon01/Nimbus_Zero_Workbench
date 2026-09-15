@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.agents.runtime import AgentRuntime
+from backend.agents.runtime import AgentRuntime, RuntimeConfig
 from backend.agents.state import StateValidationError, validate_state
 from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse, ToolCall
 from backend.models.providers import ModelProvider, ModelProviderRegistry, ProviderError, ProviderRequestError
@@ -406,9 +406,14 @@ class MockSearchTool(Tool):
         return self.result
 
 
-def runtime_with_tools(tmp_path: Path, provider: ModelProvider, tool: Tool) -> AgentRuntime:
-    config = tmp_path / "models.yaml"
-    config.write_text(
+def runtime_with_tools(
+    tmp_path: Path,
+    provider: ModelProvider,
+    tool: Tool,
+    runtime_config: RuntimeConfig | None = None,
+) -> AgentRuntime:
+    models_config = tmp_path / "models.yaml"
+    models_config.write_text(
         """models:
   - id: primary
     runtime: fake
@@ -421,9 +426,10 @@ def runtime_with_tools(tmp_path: Path, provider: ModelProvider, tool: Tool) -> A
     registry = ToolRegistry()
     registry.register(tool)
     return AgentRuntime(
-        ModelRouter(ModelRegistry(config)),
+        ModelRouter(ModelRegistry(models_config)),
         ModelProviderRegistry({"fake": provider}),
         tools=registry,
+        config=runtime_config,
     )
 
 
@@ -490,3 +496,56 @@ def test_runtime_tool_failure_returns_error_to_model(tmp_path: Path):
     assert provider.requests[1].tool_results[0].error == "index unavailable"
 
 
+class RaisingTool(Tool):
+    name = "mock.raise"
+    parameters = {}
+
+    async def execute(self, arguments: dict, context: dict) -> ToolResult:
+        raise RuntimeError("service unavailable")
+
+
+class SlowTool(Tool):
+    name = "mock.slow"
+    parameters = {}
+
+    async def execute(self, arguments: dict, context: dict) -> ToolResult:
+        await asyncio.sleep(0.1)
+        return ToolResult(success=True, output="too late")
+
+
+class MalformedResultTool(Tool):
+    name = "mock.malformed"
+    parameters = {}
+
+    async def execute(self, arguments: dict, context: dict):
+        return {"success": True, "output": "not a ToolResult"}
+
+
+@pytest.mark.parametrize(
+    ("tool", "config", "expected_error"),
+    [
+        (RaisingTool(), RuntimeConfig(), "Tool 'mock.raise' execution failed: service unavailable"),
+        (SlowTool(), RuntimeConfig(tool_timeout=0.01), "Tool 'mock.slow' timed out after 0.01s."),
+        (
+            MalformedResultTool(),
+            RuntimeConfig(),
+            "Tool 'mock.malformed' returned an invalid result: expected a ToolResult instance.",
+        ),
+    ],
+)
+def test_runtime_normalizes_tool_boundary_failures(tmp_path: Path, tool: Tool, config: RuntimeConfig, expected_error: str):
+    provider = SequencedProvider(
+        [
+            ModelResponse(content="use tool", model_id="primary", tool_calls=[ToolCall(name=tool.name)]),
+            ModelResponse(content="handled tool failure", model_id="primary"),
+        ]
+    )
+    rt = runtime_with_tools(tmp_path, provider, tool, runtime_config=config)
+
+    state, response = asyncio.run(rt.run("perform action", {"reasoning", "tool_calling"}))
+
+    assert response.content == "handled tool failure"
+    assert state.tool_results[0]["success"] is False
+    assert state.tool_results[0]["output"] is None
+    assert state.tool_results[0]["error"] == expected_error
+    assert provider.requests[1].tool_results[0].error == expected_error
