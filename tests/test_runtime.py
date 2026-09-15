@@ -82,6 +82,15 @@ class SuccessProvider(ModelProvider):
         return ModelResponse(content="successful response", model_id=model.id)
 
 
+class AttachmentProvider(ModelProvider):
+    def __init__(self):
+        self.requests: list[ModelRequest] = []
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        return ModelResponse(content="attachment response", model_id=model.id)
+
+
 class AllFailingProvider(ModelProvider):
     def __init__(self, error: ProviderError):
         self.error = error
@@ -111,6 +120,44 @@ def test_runtime_successful_generation(tmp_path: Path):
     assert isinstance(state.task_id, str) and len(state.task_id) > 0
     assert isinstance(state.execution_duration, float)
     assert state.execution_duration >= 0
+
+
+def test_runtime_routes_multimodal_inputs_and_forwards_them(tmp_path: Path):
+    config = tmp_path / "models.yaml"
+    config.write_text(
+        """models:
+  - id: vision-document
+    runtime: fake
+    model: vision-document
+    capabilities: [reasoning, vision, document_understanding]
+    modalities: [text, image, document]
+    priority: 10
+"""
+    )
+    provider = AttachmentProvider()
+    rt = AgentRuntime(ModelRouter(ModelRegistry(config)), ModelProviderRegistry({"fake": provider}))
+
+    state, response = asyncio.run(
+        rt.run("inspect inputs", {"reasoning"}, images=["encoded-image"], documents=["encoded-pdf"])
+    )
+
+    assert response.content == "attachment response"
+    assert state.selected_model == "vision-document"
+    assert state.images == ["encoded-image"]
+    assert state.documents == ["encoded-pdf"]
+    assert provider.requests[0].images == ["encoded-image"]
+    assert provider.requests[0].documents == ["encoded-pdf"]
+    assert provider.requests[0].required_capabilities == {"reasoning", "vision", "document_understanding"}
+    assert provider.requests[0].required_modality == "image"
+
+
+def test_runtime_reports_missing_multimodal_model(tmp_path: Path):
+    rt = runtime(tmp_path, SuccessProvider())
+
+    from backend.models.router import NoCompatibleModelError
+
+    with pytest.raises(NoCompatibleModelError, match="modality 'image'.*vision"):
+        asyncio.run(rt.run("inspect", {"reasoning"}, images=["encoded-image"]))
 
 
 def test_runtime_provider_failure_returns_predictable_response(tmp_path: Path):

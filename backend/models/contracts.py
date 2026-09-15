@@ -25,6 +25,9 @@ class ModelRequest:
     required_capabilities: set[str] = field(default_factory=set)
     required_modality: str = "text"
     images: list[str] = field(default_factory=list)
+    # Provider-neutral document attachments.  Providers may accept encoded
+    # documents directly or transform them into their native attachment form.
+    documents: list[str] = field(default_factory=list)
     tools: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[ToolExecutionResult] = field(default_factory=list)
 

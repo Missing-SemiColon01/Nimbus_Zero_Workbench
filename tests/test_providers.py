@@ -121,6 +121,29 @@ def test_ollama_provider_omits_images_field_for_text_request(monkeypatch):
     assert response.content == "text answer"
 
 
+def test_ollama_provider_forwards_document_attachments(monkeypatch):
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"response": "document read"})
+
+    transport = httpx.MockTransport(handler)
+
+    class TestClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            super().__init__(transport=transport, **kwargs)
+
+    monkeypatch.setattr("backend.models.providers.httpx.AsyncClient", TestClient)
+    asyncio.run(
+        OllamaProvider("http://ollama:11434").generate(
+            VISION_MODEL, ModelRequest(prompt="read", documents=["base64-pdf-data"])
+        )
+    )
+
+    assert captured["body"]["documents"] == ["base64-pdf-data"]
+
+
 def test_ollama_provider_raises_provider_error_on_http_failure(monkeypatch):
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": "Model failed to load"})

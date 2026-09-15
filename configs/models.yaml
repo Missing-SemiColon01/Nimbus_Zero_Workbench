@@ -24,6 +24,6 @@ models:
     runtime: ollama
     model: qwen2.5-vl:7b
     capabilities: [vision, document_understanding]
-    modalities: [text, image]
+    modalities: [text, image, document]
     priority: 10
     enabled: true
