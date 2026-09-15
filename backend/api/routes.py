@@ -69,7 +69,11 @@ async def list_tools(request: Request):
 async def create_task(payload: TaskCreate, request: Request):
     try:
         state, model_response = await request.app.state.runtime.run(
-            payload.request, payload.required_capabilities, payload.modality
+            payload.request,
+            payload.required_capabilities,
+            payload.modality,
+            images=payload.images,
+            documents=payload.documents,
         )
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -265,4 +269,3 @@ async def get_artifact_preview(preview_name: str, request: Request):
         filename=target_path.name,
         media_type="image/png",
     )
-

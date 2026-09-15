@@ -74,6 +74,8 @@ class OllamaProvider(ModelProvider):
         payload: dict[str, Any] = {"model": model.model, "prompt": request.prompt, "stream": False}
         if request.images:
             payload["images"] = request.images
+        if request.documents:
+            payload["documents"] = request.documents
         async with httpx.AsyncClient(timeout=120) as client:
             try:
                 response = await client.post(f"{self.base_url}/api/generate", json=payload)

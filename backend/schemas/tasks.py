@@ -22,6 +22,8 @@ class TaskCreate(BaseModel):
     task_type: TaskType | None = None
     capabilities: set[str] = Field(default_factory=set)
     modality: str = "text"
+    images: list[str] = Field(default_factory=list, description="Optional base64-encoded image inputs.")
+    documents: list[str] = Field(default_factory=list, description="Optional encoded document inputs.")
 
     @property
     def required_capabilities(self) -> set[str]:
@@ -41,4 +43,3 @@ class TaskResponse(BaseModel):
     plan: list[str]
     response: str
     execution_duration: float | None = None
-

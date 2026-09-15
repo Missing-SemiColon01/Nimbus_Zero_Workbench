@@ -50,6 +50,7 @@ def validate_state(
         user_prompt = state.user_prompt or state.user_request
         messages = state.messages
         selected_model = state.selected_model
+        attachments = {"images": state.images, "documents": state.documents}
     elif isinstance(state, Mapping):
         if "task_id" not in state or state["task_id"] is None:
             raise StateValidationError("State missing required field: 'task_id'")
@@ -65,6 +66,7 @@ def validate_state(
             raise StateValidationError("State missing required field: 'messages'")
         messages = state["messages"]
         selected_model = state.get("selected_model")
+        attachments = {name: state.get(name, []) for name in ("images", "documents")}
     else:
         raise StateValidationError(f"Invalid state object type: {type(state).__name__}")
 
@@ -80,6 +82,10 @@ def validate_state(
     for i, msg in enumerate(messages):
         if not isinstance(msg, str) or not msg.strip():
             raise StateValidationError(f"Field 'messages[{i}]' must be a non-empty string")
+
+    for field_name, values in attachments.items():
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise StateValidationError(f"Field '{field_name}' must be a list of non-empty strings")
 
     if require_model:
         if selected_model is None or not isinstance(selected_model, str) or not selected_model.strip():
@@ -99,6 +105,8 @@ class AgentState:
     plan: list[str] = field(default_factory=list)
     current_step: int = 0
     messages: list[str] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
+    documents: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
     tool_results: list[dict] = field(default_factory=list)
     retrieved_context: list[dict] = field(default_factory=list)

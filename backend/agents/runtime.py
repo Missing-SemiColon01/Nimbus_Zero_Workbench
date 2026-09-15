@@ -59,6 +59,8 @@ class AgentGraphState(TypedDict):
     user_prompt: str
     selected_model: str | None
     messages: list[str]
+    images: list[str]
+    documents: list[str]
     final_response: str | None
     errors: list[str]
     attempted_models: list[str]
@@ -118,11 +120,26 @@ class AgentRuntime:
         max_steps: int | None = None,
         tool_allowlist: set[str] | None = None,
         approved_tools: set[str] | None = None,
+        images: list[str] | None = None,
+        documents: list[str] | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         """Run the agent workflow for one task with reliability controls."""
         start_time = time.perf_counter()
         resolved_task_id = task_id or str(uuid.uuid4())
         initial_messages = [user_request] if isinstance(user_request, str) and user_request.strip() else []
+        resolved_images = self._validate_attachments(images, "images")
+        resolved_documents = self._validate_attachments(documents, "documents")
+        resolved_capabilities = set(capabilities)
+        resolved_modality = modality
+        if resolved_images:
+            resolved_capabilities.add("vision")
+            resolved_modality = "image"
+        if resolved_documents:
+            resolved_capabilities.add("document_understanding")
+            # Image-capable document models commonly handle both inputs. A
+            # document-only request uses the explicit document modality.
+            if not resolved_images:
+                resolved_modality = "document"
 
         effective_timeout = timeout if timeout is not None else self.config.timeout
         effective_max_retries = max_retries if max_retries is not None else self.config.max_retries
@@ -134,14 +151,16 @@ class AgentRuntime:
             "user_prompt": user_request,
             "selected_model": None,
             "messages": initial_messages,
+            "images": resolved_images,
+            "documents": resolved_documents,
             "final_response": None,
             "errors": [],
             "attempted_models": [],
             "provider": None,
             "fallback_used": False,
             "model_response": None,
-            "required_capabilities": capabilities,
-            "modality": modality,
+            "required_capabilities": resolved_capabilities,
+            "modality": resolved_modality,
             "status": "queued",
             "execution_duration": None,
             "step_count": 0,
@@ -180,6 +199,8 @@ class AgentRuntime:
                 user_prompt=user_request,
                 plan=["generate_response"],
                 messages=[*initial_messages, predictable_content],
+                images=resolved_images,
+                documents=resolved_documents,
                 selected_model=None,
                 final_response=predictable_content,
                 errors=[error_msg],
@@ -206,6 +227,8 @@ class AgentRuntime:
                 user_prompt=user_request,
                 plan=["generate_response"],
                 messages=[*initial_messages, predictable_content],
+                images=resolved_images,
+                documents=resolved_documents,
                 selected_model=None,
                 final_response=predictable_content,
                 errors=[error_msg],
@@ -232,6 +255,8 @@ class AgentRuntime:
                 user_prompt=user_request,
                 plan=["generate_response"],
                 messages=[*initial_messages, predictable_content],
+                images=resolved_images,
+                documents=resolved_documents,
                 selected_model=None,
                 final_response=predictable_content,
                 errors=[error_msg],
@@ -265,6 +290,8 @@ class AgentRuntime:
             user_prompt=result["user_prompt"],
             plan=["generate_response"],
             messages=result["messages"],
+            images=result.get("images", []),
+            documents=result.get("documents", []),
             selected_model=result["selected_model"],
             final_response=result["final_response"],
             errors=result["errors"],
@@ -294,6 +321,15 @@ class AgentRuntime:
             ],
         )
         return state, model_response
+
+    @staticmethod
+    def _validate_attachments(values: list[str] | None, field_name: str) -> list[str]:
+        """Normalize optional encoded attachments before they enter graph state."""
+        if values is None:
+            return []
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise StateValidationError(f"Field '{field_name}' must be a list of non-empty strings")
+        return list(values)
 
     def _effective_tool_allowlist(self, user_allowlist: set[str] | None) -> set[str] | None:
         """Combine the agent-level and caller-level scopes without allowing escalation."""
@@ -344,6 +380,8 @@ class AgentRuntime:
             prompt=state["user_prompt"],
             required_capabilities=state["required_capabilities"],
             required_modality=state["modality"],
+            images=state.get("images", []),
+            documents=state.get("documents", []),
             tools=self._tool_schemas(state.get("tool_allowlist")),
             tool_results=state.get("tool_results", []),
         )
@@ -446,6 +484,7 @@ class AgentRuntime:
                 required_capabilities=initial_request.required_capabilities,
                 required_modality=initial_request.required_modality,
                 images=initial_request.images,
+                documents=initial_request.documents,
                 tools=initial_request.tools,
                 tool_results=tool_results,
             )
