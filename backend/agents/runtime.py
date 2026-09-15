@@ -20,6 +20,7 @@ from backend.agents.state import (
 from backend.models.contracts import ModelRequest, ModelResponse, ToolCall, ToolExecutionResult
 from backend.models.providers import ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter
+from backend.security.policy import PolicyDecision, PolicyEngine
 from backend.tools.contracts import ToolResult
 from backend.tools.registry import ToolRegistry
 
@@ -28,6 +29,7 @@ from backend.tools.registry import ToolRegistry
 class RuntimeConfig:
     timeout: float = 60.0
     tool_timeout: float = 30.0
+    tool_allowlist: frozenset[str] | None = None
     max_retries: int = 2
     max_steps: int = 15
     max_tool_rounds: int = 3
@@ -72,6 +74,10 @@ class AgentGraphState(TypedDict):
     max_retries: int
     max_steps: int
     tool_results: list[ToolExecutionResult]
+    tool_allowlist: set[str] | None
+    approved_tools: set[str]
+    approval_required: bool
+    approval_requests: list[dict[str, Any]]
 
 
 class AgentRuntime:
@@ -83,11 +89,13 @@ class AgentRuntime:
         providers: ModelProviderRegistry,
         tools: ToolRegistry | None = None,
         config: RuntimeConfig | None = None,
+        policy: PolicyEngine | None = None,
     ):
         self.router = router
         self.providers = providers
         self.tools = tools
         self.config = config or RuntimeConfig()
+        self.policy = policy or PolicyEngine()
 
         workflow = StateGraph(AgentGraphState)
         workflow.add_node("validate_input", self._validate_input)
@@ -108,6 +116,8 @@ class AgentRuntime:
         timeout: float | None = None,
         max_retries: int | None = None,
         max_steps: int | None = None,
+        tool_allowlist: set[str] | None = None,
+        approved_tools: set[str] | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         """Run the agent workflow for one task with reliability controls."""
         start_time = time.perf_counter()
@@ -117,6 +127,7 @@ class AgentRuntime:
         effective_timeout = timeout if timeout is not None else self.config.timeout
         effective_max_retries = max_retries if max_retries is not None else self.config.max_retries
         effective_max_steps = max_steps if max_steps is not None else self.config.max_steps
+        effective_tool_allowlist = self._effective_tool_allowlist(tool_allowlist)
 
         initial_state: AgentGraphState = {
             "task_id": resolved_task_id,
@@ -138,6 +149,10 @@ class AgentRuntime:
             "max_retries": effective_max_retries,
             "max_steps": effective_max_steps,
             "tool_results": [],
+            "tool_allowlist": effective_tool_allowlist,
+            "approved_tools": set(approved_tools or ()),
+            "approval_required": False,
+            "approval_requests": [],
         }
 
         # Pre-validate input state before invoking workflow
@@ -256,6 +271,8 @@ class AgentRuntime:
             provider=result["provider"],
             fallback_used=result["fallback_used"],
             attempted_models=result["attempted_models"],
+            approval_required=result.get("approval_required", False),
+            approval_requests=result.get("approval_requests", []),
             status=status,
             execution_duration=execution_duration,
             step_count=result.get("step_count", 0),
@@ -277,6 +294,15 @@ class AgentRuntime:
             ],
         )
         return state, model_response
+
+    def _effective_tool_allowlist(self, user_allowlist: set[str] | None) -> set[str] | None:
+        """Combine the agent-level and caller-level scopes without allowing escalation."""
+        agent_allowlist = self.config.tool_allowlist
+        if agent_allowlist is None:
+            return set(user_allowlist) if user_allowlist is not None else None
+        if user_allowlist is None:
+            return set(agent_allowlist)
+        return set(agent_allowlist).intersection(user_allowlist)
 
     def _track_step(self, state: AgentGraphState, node_name: str) -> tuple[int, list[str]]:
         """Increment step count, update history, and check limits and loops."""
@@ -318,7 +344,7 @@ class AgentRuntime:
             prompt=state["user_prompt"],
             required_capabilities=state["required_capabilities"],
             required_modality=state["modality"],
-            tools=self._tool_schemas(),
+            tools=self._tool_schemas(state.get("tool_allowlist")),
             tool_results=state.get("tool_results", []),
         )
         candidates = self.router.candidates(model_request)
@@ -341,7 +367,7 @@ class AgentRuntime:
 
             attempted_models.append(model.id)
             try:
-                response, tool_results = await self._generate_with_tools(model, model_request, state)
+                response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
             except ProviderRequestError:
                 # A malformed request must not be retried against another model.
                 raise
@@ -360,7 +386,9 @@ class AgentRuntime:
                 "errors": errors,
                 "model_response": response,
                 "tool_results": tool_results,
-                "status": "completed",
+                "approval_required": bool(approval_requests),
+                "approval_requests": approval_requests,
+                "status": "awaiting_approval" if approval_requests else "completed",
                 "step_count": step_count,
                 "node_history": node_history,
             }
@@ -395,18 +423,24 @@ class AgentRuntime:
         model: Any,
         initial_request: ModelRequest,
         state: AgentGraphState,
-    ) -> tuple[ModelResponse, list[ToolExecutionResult]]:
+    ) -> tuple[ModelResponse, list[ToolExecutionResult], list[dict[str, Any]]]:
         request = initial_request
         tool_results = list(state.get("tool_results", []))
+        approval_requests = list(state.get("approval_requests", []))
         response = await self.providers.generate(model, request)
 
         for _ in range(self.config.max_tool_rounds):
             tool_calls = self._detect_tool_calls(response)
             if not tool_calls:
-                return response, tool_results
+                return response, tool_results, approval_requests
 
             round_results = [await self._execute_tool_call(tool_call, state) for tool_call in tool_calls]
             tool_results.extend(round_results)
+            approval_requests.extend(
+                self._approval_request(tool_call, result)
+                for tool_call, result in zip(tool_calls, round_results)
+                if self._requires_approval(result)
+            )
             request = ModelRequest(
                 prompt=self._prompt_with_tool_results(state["user_prompt"], response, round_results),
                 required_capabilities=initial_request.required_capabilities,
@@ -475,6 +509,34 @@ class AgentRuntime:
                 success=False,
                 output=None,
                 error=f"Tool '{tool_call.name}' is not registered.",
+                id=tool_call.id,
+            )
+
+        allowed_tools = state.get("tool_allowlist")
+        if allowed_tools is not None and tool_call.name not in allowed_tools:
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error=f"Tool '{tool_call.name}' is not allowed for this agent or user.",
+                id=tool_call.id,
+            )
+
+        decision = self.policy.evaluate(tool_call.name)
+        if decision is PolicyDecision.DENY:
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output=None,
+                error=f"Tool '{tool_call.name}' is blocked by safety policy.",
+                id=tool_call.id,
+            )
+        if decision is PolicyDecision.REQUIRE_APPROVAL and tool_call.name not in state.get("approved_tools", set()):
+            return ToolExecutionResult(
+                name=tool_call.name,
+                success=False,
+                output={"approval_required": True, "tool": tool_call.name},
+                error=f"Tool '{tool_call.name}' requires human approval.",
                 id=tool_call.id,
             )
 
@@ -548,6 +610,18 @@ class AgentRuntime:
             id=tool_call.id,
         )
 
+    def _requires_approval(self, result: ToolExecutionResult) -> bool:
+        return bool(isinstance(result.output, dict) and result.output.get("approval_required") is True)
+
+    def _approval_request(self, tool_call: ToolCall, result: ToolExecutionResult) -> dict[str, Any]:
+        """Structured approval hook for an API or UI to present to a human later."""
+        return {
+            "tool": tool_call.name,
+            "arguments": tool_call.arguments,
+            "tool_call_id": tool_call.id,
+            "reason": result.error,
+        }
+
     def _validate_tool_arguments(self, arguments: dict[str, Any], schema: dict[str, Any]) -> str | None:
         required = schema.get("required", []) if isinstance(schema, dict) else []
         for field in required:
@@ -576,7 +650,7 @@ class AgentRuntime:
             return isinstance(value, dict)
         return True
 
-    def _tool_schemas(self) -> list[dict[str, Any]]:
+    def _tool_schemas(self, allowlist: set[str] | None = None) -> list[dict[str, Any]]:
         if self.tools is None:
             return []
         return [
@@ -586,6 +660,7 @@ class AgentRuntime:
                 "parameters": getattr(tool, "parameters", {}),
             }
             for tool in (self.tools.get(name) for name in self.tools.names())
+            if allowlist is None or tool.name in allowlist
         ]
 
     def _prompt_with_tool_results(

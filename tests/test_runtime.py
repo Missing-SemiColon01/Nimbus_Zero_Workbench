@@ -549,3 +549,77 @@ def test_runtime_normalizes_tool_boundary_failures(tmp_path: Path, tool: Tool, c
     assert state.tool_results[0]["output"] is None
     assert state.tool_results[0]["error"] == expected_error
     assert provider.requests[1].tool_results[0].error == expected_error
+
+
+class TrackingTool(Tool):
+    parameters = {}
+
+    def __init__(self, name: str):
+        self.name = name
+        self.calls = 0
+
+    async def execute(self, arguments: dict, context: dict) -> ToolResult:
+        self.calls += 1
+        return ToolResult(success=True, output={"executed": self.name})
+
+
+def tool_calling_provider(tool_name: str) -> SequencedProvider:
+    return SequencedProvider(
+        [
+            ModelResponse(content="use tool", model_id="primary", tool_calls=[ToolCall(name=tool_name)]),
+            ModelResponse(content="tool handled", model_id="primary"),
+        ]
+    )
+
+
+def test_runtime_executes_safe_tool_allowed_for_user(tmp_path: Path):
+    tool = TrackingTool("rag.search")
+    rt = runtime_with_tools(tmp_path, tool_calling_provider(tool.name), tool)
+
+    state, _ = asyncio.run(
+        rt.run("search", {"reasoning", "tool_calling"}, tool_allowlist={"rag.search"})
+    )
+
+    assert tool.calls == 1
+    assert state.tool_results[0]["success"] is True
+    assert state.approval_required is False
+
+
+def test_runtime_denies_tool_outside_agent_or_user_allowlist(tmp_path: Path):
+    tool = TrackingTool("rag.search")
+    rt = runtime_with_tools(
+        tmp_path,
+        tool_calling_provider(tool.name),
+        tool,
+        runtime_config=RuntimeConfig(tool_allowlist=frozenset({"rag.search"})),
+    )
+
+    state, _ = asyncio.run(
+        rt.run("search", {"reasoning", "tool_calling"}, tool_allowlist={"vision.analyze"})
+    )
+
+    assert tool.calls == 0
+    assert state.tool_results[0]["success"] is False
+    assert state.tool_results[0]["error"] == "Tool 'rag.search' is not allowed for this agent or user."
+    assert state.approval_required is False
+
+
+def test_runtime_returns_approval_request_for_risky_tool(tmp_path: Path):
+    tool = TrackingTool("document.create")
+    rt = runtime_with_tools(tmp_path, tool_calling_provider(tool.name), tool)
+
+    state, _ = asyncio.run(rt.run("create document", {"reasoning", "tool_calling"}))
+
+    assert tool.calls == 0
+    assert state.status == "awaiting_approval"
+    assert state.approval_required is True
+    assert state.tool_results[0]["success"] is False
+    assert state.tool_results[0]["error"] == "Tool 'document.create' requires human approval."
+    assert state.approval_requests == [
+        {
+            "tool": "document.create",
+            "arguments": {},
+            "tool_call_id": None,
+            "reason": "Tool 'document.create' requires human approval.",
+        }
+    ]

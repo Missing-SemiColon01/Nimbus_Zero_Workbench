@@ -109,6 +109,7 @@ class AgentState:
     fallback_used: bool = False
     attempted_models: list[str] = field(default_factory=list)
     approval_required: bool = False
+    approval_requests: list[dict[str, Any]] = field(default_factory=list)
     status: str = "queued"
     execution_duration: float | None = None
     step_count: int = 0
