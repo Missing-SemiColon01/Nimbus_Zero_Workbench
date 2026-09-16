@@ -55,3 +55,21 @@ Use `generated_artifacts[].download_url` for the frontend download action.
 curl http://localhost:8000/api/v1/artifacts
 curl -OJ http://localhost:8000/api/v1/artifacts/<filename>/download
 ```
+
+## 5. Smoke check before demo
+
+Start the backend, then run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\dev4_smoke.py
+```
+
+The smoke check verifies:
+
+- `/health`
+- `/models`
+- `/tools`
+- basic `/tasks`
+- `/artifacts`
+
+If the basic task fails because Ollama is not running, the API is reachable but model runtime setup still needs attention.
