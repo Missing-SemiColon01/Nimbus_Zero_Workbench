@@ -19,11 +19,16 @@ Capabilities:
 from __future__ import annotations
 
 import base64
+import io
 import logging
 from pathlib import Path
 from typing import Any
 
+import fitz  # PyMuPDF
+from PIL import Image
+
 from backend.core.config import get_settings
+from backend.knowledge.ocr import extract_text_from_image, ocr_image
 from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse
 from backend.models.providers import ModelProvider, ModelProviderRegistry, OllamaProvider
 from backend.models.registry import ModelRegistry
@@ -37,25 +42,63 @@ DEFAULT_VISION_PROMPT: str = (
     "and signatures, and describe any diagrams, charts, or defects visible."
 )
 
-SUPPORTED_EXTENSIONS: set[str] = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif"}
+SUPPORTED_EXTENSIONS: set[str] = {
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif", ".pdf"
+}
+
+
+def render_pdf_page_to_image(pdf_source: str | Path | bytes, page_number: int = 1, dpi: int = 200) -> bytes:
+    """
+    Render a specific page of a PDF file to PNG image bytes.
+    page_number is 1-indexed.
+    """
+    if isinstance(pdf_source, bytes):
+        doc = fitz.open(stream=pdf_source, filetype="pdf")
+    else:
+        path = Path(pdf_source)
+        if not path.exists():
+            raise FileNotFoundError(f"PDF file not found: {path}")
+        doc = fitz.open(str(path))
+
+    try:
+        if doc.page_count == 0:
+            raise ValueError("PDF document contains no pages.")
+        if not (1 <= page_number <= doc.page_count):
+            raise ValueError(f"Page number {page_number} is out of range (1 to {doc.page_count}).")
+
+        page = doc.load_page(page_number - 1)
+        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        return pix.tobytes("png")
+    finally:
+        doc.close()
 
 
 def encode_image_to_base64(image_source: str | Path | bytes) -> str:
     """
     Load an image from path or bytes and return a base64-encoded ASCII string.
+    If given a PDF path or bytes, automatically renders the first page.
     """
     if isinstance(image_source, bytes):
+        if image_source.startswith(b"%PDF"):
+            png_bytes = render_pdf_page_to_image(image_source, page_number=1)
+            return base64.b64encode(png_bytes).decode("utf-8")
         return base64.b64encode(image_source).decode("utf-8")
 
     path = Path(image_source)
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {path}")
 
-    if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+    suffix = path.suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
         raise ValueError(
             f"Unsupported image format '{path.suffix}'. "
             f"Supported formats: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
         )
+
+    if suffix == ".pdf":
+        png_bytes = render_pdf_page_to_image(path, page_number=1)
+        return base64.b64encode(png_bytes).decode("utf-8")
 
     image_bytes = path.read_bytes()
     return base64.b64encode(image_bytes).decode("utf-8")
@@ -63,20 +106,30 @@ def encode_image_to_base64(image_source: str | Path | bytes) -> str:
 
 class VisionAnalyzeTool(Tool):
     """
-    Autonomous tool for analyzing page images, blueprints, and scanned schematics.
+    Autonomous tool for analyzing page images, blueprints, scanned PDFs, and equipment photos.
     """
 
     name = "vision.analyze"
     description = (
-        "Analyze an image file or rendered document page using the sovereign multimodal vision model. "
-        "Transcribes handwriting, tables, and stamps, and extracts visual defect findings or diagram details."
+        "Analyze an image file, diagram, photo, or rendered PDF page using the sovereign multimodal vision model. "
+        "Automatically renders scanned PDFs, runs OCR extraction, transcribes handwriting and stamps, and extracts "
+        "visual defect findings, charts, or equipment details."
     )
     parameters = {
         "type": "object",
         "properties": {
             "image_path": {
                 "type": "string",
-                "description": "Path to the image file to analyze (PNG, JPG, WEBP, etc.).",
+                "description": "Path to the image file or PDF document to analyze (PNG, JPG, PDF, etc.).",
+            },
+            "document_path": {
+                "type": "string",
+                "description": "Optional alias for image_path to analyze a document or scanned PDF.",
+            },
+            "page_number": {
+                "type": "integer",
+                "description": "Optional page number to render and analyze for multi-page PDFs (1-indexed, default: 1).",
+                "default": 1,
             },
             "prompt": {
                 "type": "string",
@@ -135,38 +188,63 @@ class VisionAnalyzeTool(Tool):
 
     async def execute(self, arguments: dict[str, Any], context: dict[str, Any]) -> ToolResult:
         """
-        Execute visual analysis on the target image.
+        Execute visual analysis and OCR on the target image or scanned PDF.
         """
-        raw_path = arguments.get("image_path")
+        raw_path = arguments.get("image_path") or arguments.get("document_path")
         if not raw_path or not str(raw_path).strip():
             return ToolResult(
                 success=False,
                 output={},
-                error="Argument 'image_path' is required and cannot be empty.",
+                error="Argument 'image_path' or 'document_path' is required and cannot be empty.",
             )
 
         prompt = arguments.get("prompt") or DEFAULT_VISION_PROMPT
+        page_number = int(arguments.get("page_number", 1))
 
-        # 1. Base64 Encode Image
+        # 1. Base64 Encode Image & Render PDF Page if applicable
         try:
-            base64_image = encode_image_to_base64(raw_path)
+            target_path = Path(raw_path)
+            is_pdf = target_path.is_file() and target_path.suffix.lower() == ".pdf"
+            if is_pdf:
+                raw_bytes = render_pdf_page_to_image(target_path, page_number=page_number)
+                base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+            else:
+                base64_image = encode_image_to_base64(raw_path)
+                raw_bytes = base64.b64decode(base64_image)
         except Exception as exc:
-            logger.error("Failed to read image for vision analysis: %s", exc)
+            logger.error("Failed to read/render image for vision analysis: %s", exc)
             return ToolResult(
                 success=False,
                 output={},
                 error=f"Image load error: {exc}",
             )
 
-        # 2. Construct ModelRequest
+        # 2. Extract OCR text from the rendered image / document
+        ocr_text = ""
+        try:
+            ocr_result = ocr_image(raw_bytes)
+            if ocr_result.has_text:
+                ocr_text = ocr_result.text.strip()
+        except Exception as ocr_exc:
+            logger.warning("OCR extraction during vision analysis failed: %s", ocr_exc)
+
+        # 3. Construct ModelRequest with image payload
+        # If OCR text is available, enrich the prompt so vision model has full multimodal context
+        model_prompt = prompt
+        if ocr_text:
+            model_prompt = (
+                f"{prompt}\n\n"
+                f"[Transcribed Text from OCR]:\n{ocr_text}"
+            )
+
         request = ModelRequest(
-            prompt=prompt,
+            prompt=model_prompt,
             images=[base64_image],
             required_capabilities={"vision"},
             required_modality="image",
         )
 
-        # 3. Resolve Vision Model
+        # 4. Resolve Vision Model
         try:
             model = self._resolve_model(request)
         except Exception as exc:
@@ -177,15 +255,25 @@ class VisionAnalyzeTool(Tool):
                 error=f"Model routing error: {exc}",
             )
 
-        # 4. Invoke Vision Model
+        # 5. Invoke Vision Model
         try:
             logger.info("Executing vision.analyze on '%s' with model '%s'...", raw_path, model.model)
             response: ModelResponse = await self.provider.generate(model, request)
 
+            combined_result_parts: list[str] = []
+            if ocr_text:
+                combined_result_parts.append(f"OCR Transcription:\n{ocr_text}")
+            combined_result_parts.append(f"Visual Analysis:\n{response.content}")
+            combined_result = "\n\n".join(combined_result_parts)
+
             output_data = {
                 "analysis": response.content,
+                "ocr_text": ocr_text,
+                "combined_result": combined_result,
                 "model": model.id,
                 "image_path": str(raw_path),
+                "is_pdf": is_pdf,
+                "page_number": page_number if is_pdf else None,
             }
 
             # If execution context has tool_results list, record it

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -113,6 +114,60 @@ class IndustrialWorkbenchAgent:
         if unknown:
             names = ", ".join(sorted(unknown))
             raise ValueError(f"Agent '{self.config.id}' references unregistered tools: {names}")
+
+    async def inspect_multimodal(
+        self,
+        user_request: str,
+        *,
+        document_path: str | Path | None = None,
+        image_path: str | Path | None = None,
+        page_number: int = 1,
+        capabilities: set[str] | None = None,
+        prompt: str | None = None,
+    ) -> tuple[AgentState, ModelResponse]:
+        """
+        Convenience method to execute combined OCR and vision inspection across
+        scanned PDFs, blueprints/diagrams, or equipment photos directly through the agent.
+        """
+        req_capabilities = set(capabilities or {"vision", "document_understanding"})
+        documents = [str(document_path)] if document_path else None
+        images = [str(image_path)] if image_path else None
+
+        # Execute vision tool directly to ensure OCR + Vision combination
+        if self.tools and "vision.analyze" in self.tools.names():
+            vision_tool = self.tools.get("vision.analyze")
+            target = str(document_path or image_path)
+            tool_args: dict[str, Any] = {
+                "image_path": target,
+                "prompt": prompt or user_request,
+                "page_number": page_number,
+            }
+            try:
+                tool_res = await vision_tool.execute(tool_args, context={})
+                if tool_res.success and isinstance(tool_res.output, dict):
+                    combined = tool_res.output.get("combined_result") or tool_res.output.get("analysis")
+                    enriched_request = (
+                        f"{user_request}\n\n"
+                        f"[Inspected Multimodal Evidence - OCR & Vision Analysis]:\n"
+                        f"{combined}"
+                    )
+                    return await self.run(
+                        enriched_request,
+                        req_capabilities,
+                        modality="image" if images else "document",
+                        images=images,
+                        documents=documents,
+                    )
+            except Exception:
+                pass
+
+        return await self.run(
+            user_request,
+            req_capabilities,
+            modality="image" if images else ("document" if documents else "text"),
+            images=images,
+            documents=documents,
+        )
 
     async def run(
         self,
