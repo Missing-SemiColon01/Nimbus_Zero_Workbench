@@ -1,6 +1,8 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from backend.schemas.artifacts import ArtifactInfo
 
 
 TASK_TYPE_CAPABILITIES: dict[str, set[str]] = {
@@ -25,6 +27,14 @@ class TaskCreate(BaseModel):
     modality: str = "text"
     images: list[str] = Field(default_factory=list, description="Optional base64-encoded image inputs.")
     documents: list[str] = Field(default_factory=list, description="Optional encoded document inputs.")
+    document_paths: list[str] = Field(
+        default_factory=list,
+        description="Optional local uploaded document paths returned by /ingest/upload.",
+    )
+    approved_tools: set[str] = Field(
+        default_factory=set,
+        description="Tool names explicitly approved by a human for this task run.",
+    )
 
     @property
     def required_capabilities(self) -> set[str]:
@@ -44,3 +54,9 @@ class TaskResponse(BaseModel):
     plan: list[str]
     response: str
     execution_duration: float | None = None
+    artifacts: list[str] = Field(default_factory=list)
+    generated_artifacts: list[ArtifactInfo] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    approval_required: bool = False
+    approval_requests: list[dict[str, Any]] = Field(default_factory=list)

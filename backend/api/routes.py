@@ -25,6 +25,59 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _resolve_inside(base_dir: Path, requested_path: str) -> Path:
+    """Resolve a caller-provided path while ensuring it stays inside base_dir."""
+    resolved_base = base_dir.resolve()
+    candidate = Path(requested_path)
+    if not candidate.is_absolute():
+        candidate = resolved_base / candidate
+    resolved_path = candidate.resolve()
+    if not resolved_path.is_file() or not resolved_path.is_relative_to(resolved_base):
+        raise HTTPException(status_code=404, detail=f"Document not found: {requested_path}")
+    return resolved_path
+
+
+def _safe_upload_target(uploads_dir: Path, filename: str) -> Path:
+    """Return a safe upload destination for a user-supplied filename."""
+    safe_name = Path(filename).name
+    if not safe_name or safe_name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Uploaded file must have a valid filename.")
+    return uploads_dir / safe_name
+
+
+def _artifact_info(file_path: Path, *, artifacts_dir: Path, previews_dir: Path) -> ArtifactInfo:
+    """Build API download metadata for a generated artifact path."""
+    ext = file_path.suffix.lstrip(".").lower()
+    stat = file_path.stat()
+    preview_url = None
+    preview_candidate = previews_dir / f"{file_path.stem}-page-1.png"
+    if preview_candidate.exists():
+        preview_url = f"/api/v1/artifacts/previews/{preview_candidate.name}"
+
+    return ArtifactInfo(
+        filename=file_path.name,
+        file_type=ext,
+        size_bytes=stat.st_size,
+        download_url=f"/api/v1/artifacts/{file_path.name}/download",
+        preview_url=preview_url,
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+    )
+
+
+def _task_artifact_infos(settings: Any, artifact_paths: list[str]) -> list[ArtifactInfo]:
+    """Convert task artifact paths to downloadable metadata, ignoring stale paths."""
+    artifacts_dir: Path = settings.data_dir / "artifacts"
+    previews_dir: Path = settings.data_dir / "tmp" / "artifact-previews"
+    items: list[ArtifactInfo] = []
+    for artifact_path in artifact_paths:
+        try:
+            file_path = _safe_resolve(artifacts_dir, Path(artifact_path).name)
+        except HTTPException:
+            continue
+        items.append(_artifact_info(file_path, artifacts_dir=artifacts_dir, previews_dir=previews_dir))
+    return items
+
+
 # -- System & Health -----------------------------------------------------------
 
 @router.get("/health")
@@ -67,13 +120,23 @@ async def list_tools(request: Request):
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreate, request: Request):
+    uploads_dir: Path = request.app.state.settings.data_dir / "uploads"
+    document_paths = [
+        str(_resolve_inside(uploads_dir, document_path))
+        for document_path in payload.document_paths
+    ]
+    documents = [*payload.documents, *document_paths]
+    required_capabilities = payload.required_capabilities
+    if documents and payload.task_type is None and not payload.capabilities:
+        required_capabilities = {"document_understanding"}
     try:
         state, model_response = await request.app.state.agent.run(
             payload.request,
-            payload.required_capabilities,
+            required_capabilities,
             payload.modality,
             images=payload.images,
-            documents=payload.documents,
+            documents=documents,
+            approved_tools=payload.approved_tools,
         )
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -95,6 +158,12 @@ async def create_task(payload: TaskCreate, request: Request):
         plan=state.plan,
         response=state.final_response or model_response.content,
         execution_duration=state.execution_duration,
+        artifacts=state.artifacts,
+        generated_artifacts=_task_artifact_infos(request.app.state.settings, state.artifacts),
+        tool_results=state.tool_results,
+        errors=state.errors,
+        approval_required=state.approval_required,
+        approval_requests=state.approval_requests,
     )
 
 
@@ -122,7 +191,7 @@ async def ingest_file_path(payload: IngestRequest, request: Request):
     if result.status == "failed":
         raise HTTPException(status_code=400, detail=f"Ingestion failed: {result.error}")
 
-    return IngestResponse(**result.to_dict())
+    return IngestResponse(**result.to_dict(), document_path=str(path.resolve()))
 
 
 @router.post("/ingest/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
@@ -142,7 +211,7 @@ async def ingest_upload(
 
     uploads_dir: Path = request.app.state.settings.data_dir / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
-    target_path = uploads_dir / file.filename
+    target_path = _safe_upload_target(uploads_dir, file.filename)
 
     # Save uploaded bytes to disk
     try:
@@ -162,7 +231,7 @@ async def ingest_upload(
     if result.status == "failed":
         raise HTTPException(status_code=400, detail=f"Ingestion failed: {result.error}")
 
-    return IngestResponse(**result.to_dict())
+    return IngestResponse(**result.to_dict(), document_path=str(target_path.resolve()))
 
 
 @router.post("/knowledge/search", response_model=KnowledgeSearchResponse)
@@ -219,24 +288,7 @@ async def list_artifacts(request: Request):
     items: list[ArtifactInfo] = []
     for file_path in artifacts_dir.iterdir():
         if file_path.is_file():
-            ext = file_path.suffix.lstrip(".").lower()
-            stat = file_path.stat()
-            preview_url = None
-            if previews_dir.exists():
-                preview_candidate = previews_dir / f"{file_path.stem}-page-1.png"
-                if preview_candidate.exists():
-                    preview_url = f"/api/v1/artifacts/previews/{preview_candidate.name}"
-
-            items.append(
-                ArtifactInfo(
-                    filename=file_path.name,
-                    file_type=ext,
-                    size_bytes=stat.st_size,
-                    download_url=f"/api/v1/artifacts/{file_path.name}/download",
-                    preview_url=preview_url,
-                    modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-                )
-            )
+            items.append(_artifact_info(file_path, artifacts_dir=artifacts_dir, previews_dir=previews_dir))
 
     items.sort(key=lambda item: item.modified_at, reverse=True)
     return items

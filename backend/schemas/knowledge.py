@@ -25,6 +25,7 @@ class IngestResponse(BaseModel):
 
     document_id: str
     filename: str
+    document_path: str | None = Field(None, description="Saved local PDF path usable as a task document reference.")
     page_count: int
     chunk_count: int
     ocr_pages: int
