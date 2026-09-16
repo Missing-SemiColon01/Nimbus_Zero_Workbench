@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,3 +44,8 @@ class TaskResponse(BaseModel):
     plan: list[str]
     response: str
     execution_duration: float | None = None
+    artifacts: list[str] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    approval_required: bool = False
+    approval_requests: list[dict[str, Any]] = Field(default_factory=list)

@@ -29,6 +29,7 @@ from backend.knowledge.vector_store import (
     SearchResult,
     VectorStore,
     get_vector_store,
+    reset_vector_store,
 )
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,13 @@ def get_retriever() -> KnowledgeRetriever:
     if _RETRIEVER_INSTANCE is None:
         _RETRIEVER_INSTANCE = KnowledgeRetriever()
     return _RETRIEVER_INSTANCE
+
+
+def reset_retriever() -> None:
+    """Close and clear global retriever resources."""
+    global _RETRIEVER_INSTANCE
+    _RETRIEVER_INSTANCE = None
+    reset_vector_store()
 
 
 # -- CLI standalone runner -----------------------------------------------------

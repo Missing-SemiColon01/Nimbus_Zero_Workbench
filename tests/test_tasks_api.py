@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from backend.main import app
-from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse
+from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse, ToolCall
 from backend.models.providers import ModelProvider, ProviderError, ProviderRequestError
 
 
@@ -41,6 +41,27 @@ class InvalidRequestProvider(ModelProvider):
         raise ProviderRequestError("prompt is malformed")
 
 
+class ApprovalToolProvider(ModelProvider):
+    def __init__(self):
+        self.calls = 0
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return ModelResponse(
+                content='{"tool":"document.create","arguments":{"title":"Approval note"}}',
+                model_id=model.id,
+                tool_calls=[
+                    ToolCall(
+                        name="document.create",
+                        arguments={"title": "Approval note"},
+                        id="create-doc-1",
+                    )
+                ],
+            )
+        return ModelResponse(content="Approval is required before creating the document.", model_id=model.id)
+
+
 @pytest.mark.asyncio
 async def test_create_task_generates_response_with_selected_model():
     provider = FakeProvider()
@@ -64,6 +85,11 @@ async def test_create_task_generates_response_with_selected_model():
     assert body["response"] == "Generated answer"
     assert isinstance(body["execution_duration"], float)
     assert body["execution_duration"] >= 0
+    assert body["artifacts"] == []
+    assert body["tool_results"] == []
+    assert body["errors"] == []
+    assert body["approval_required"] is False
+    assert body["approval_requests"] == []
     assert len(provider.calls) == 1
     model, request = provider.calls[0]
     assert model.id == "reasoning"
@@ -97,7 +123,15 @@ async def test_create_task_falls_back_to_next_eligible_model():
             )
 
     assert response.status_code == 201
-    assert response.json() | {"task_id": "ignored", "execution_duration": "ignored"} == {
+    assert response.json() | {
+        "task_id": "ignored",
+        "execution_duration": "ignored",
+        "artifacts": [],
+        "tool_results": [],
+        "errors": [],
+        "approval_required": False,
+        "approval_requests": [],
+    } == {
         "task_id": "ignored",
         "status": "completed",
         "selected_model": "reasoning-fallback",
@@ -107,6 +141,11 @@ async def test_create_task_falls_back_to_next_eligible_model():
         "plan": ["generate_response"],
         "response": "Fallback answer",
         "execution_duration": "ignored",
+        "artifacts": [],
+        "tool_results": [],
+        "errors": [],
+        "approval_required": False,
+        "approval_requests": [],
     }
     assert isinstance(response.json()["execution_duration"], float)
     assert response.json()["execution_duration"] >= 0
@@ -144,3 +183,31 @@ async def test_create_task_maps_task_type_to_capability():
     assert response.status_code == 201
     assert response.json()["selected_model"] == "coding"
     assert provider.calls[0][1].required_capabilities == {"coding"}
+
+
+@pytest.mark.asyncio
+async def test_create_task_returns_trace_fields_for_tool_approval():
+    provider = ApprovalToolProvider()
+    async with app.router.lifespan_context(app):
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={"request": "Create an approval note", "task_type": "reasoning"},
+            )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "awaiting_approval"
+    assert body["approval_required"] is True
+    assert body["approval_requests"] == [
+        {
+            "tool": "document.create",
+            "arguments": {"title": "Approval note"},
+            "tool_call_id": "create-doc-1",
+            "reason": "Tool 'document.create' requires human approval.",
+        }
+    ]
+    assert body["tool_results"][0]["tool"] == "document.create"
+    assert body["tool_results"][0]["success"] is False
+    assert body["artifacts"] == []

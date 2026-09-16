@@ -95,6 +95,11 @@ async def create_task(payload: TaskCreate, request: Request):
         plan=state.plan,
         response=state.final_response or model_response.content,
         execution_duration=state.execution_duration,
+        artifacts=state.artifacts,
+        tool_results=state.tool_results,
+        errors=state.errors,
+        approval_required=state.approval_required,
+        approval_requests=state.approval_requests,
     )
 
 

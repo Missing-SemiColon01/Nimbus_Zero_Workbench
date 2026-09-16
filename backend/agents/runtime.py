@@ -181,17 +181,14 @@ class AgentRuntime:
         validate_state(initial_state, require_model=False)
 
         try:
+            graph_call = self.graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": max(effective_max_steps * 2, 25)},
+            )
             if effective_timeout is not None and effective_timeout > 0:
-                async with asyncio.timeout(effective_timeout):
-                    result = await self.graph.ainvoke(
-                        initial_state,
-                        config={"recursion_limit": max(effective_max_steps * 2, 25)},
-                    )
+                result = await asyncio.wait_for(graph_call, timeout=effective_timeout)
             else:
-                result = await self.graph.ainvoke(
-                    initial_state,
-                    config={"recursion_limit": max(effective_max_steps * 2, 25)},
-                )
+                result = await graph_call
         except (TimeoutError, asyncio.TimeoutError):
             execution_duration = round(time.perf_counter() - start_time, 4)
             error_msg = f"Task execution timed out after {effective_timeout}s"
@@ -606,11 +603,11 @@ class AgentRuntime:
                 "tool_results": state.get("tool_results", []),
                 "retrieved_context": [],
             }
+            tool_call_task = tool.execute(tool_call.arguments, context=context)
             if self.config.tool_timeout > 0:
-                async with asyncio.timeout(self.config.tool_timeout):
-                    result = await tool.execute(tool_call.arguments, context=context)
+                result = await asyncio.wait_for(tool_call_task, timeout=self.config.tool_timeout)
             else:
-                result = await tool.execute(tool_call.arguments, context=context)
+                result = await tool_call_task
         except (TimeoutError, asyncio.TimeoutError):
             return ToolExecutionResult(
                 name=tool_call.name,

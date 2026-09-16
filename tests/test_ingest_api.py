@@ -21,6 +21,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from backend.main import app
+from backend.knowledge.retriever import IngestResult
 
 
 def _create_minimal_pdf(path: Path, text: str = "Inspection findings: valve intact.") -> Path:
@@ -49,15 +50,26 @@ class TestIngestAPI:
 
     def test_ingest_valid_pdf_path(self, client: TestClient, tmp_path: Path):
         pdf_path = _create_minimal_pdf(tmp_path / "test_doc.pdf")
-
-        response = client.post(
-            "/api/v1/ingest",
-            json={
-                "file_path": str(pdf_path),
-                "document_id": "test_doc_01",
-                "chunk_size": 200,
-            },
+        retriever = MagicMock()
+        retriever.ingest_document.return_value = IngestResult(
+            document_id="test_doc_01",
+            filename="test_doc.pdf",
+            page_count=1,
+            chunk_count=1,
+            ocr_pages=0,
+            duration_seconds=0.01,
+            status="success",
         )
+
+        with patch("backend.api.routes.get_retriever", return_value=retriever):
+            response = client.post(
+                "/api/v1/ingest",
+                json={
+                    "file_path": str(pdf_path),
+                    "document_id": "test_doc_01",
+                    "chunk_size": 200,
+                },
+            )
 
         assert response.status_code == 201
         data = response.json()
@@ -66,6 +78,12 @@ class TestIngestAPI:
         assert data["page_count"] == 1
         assert data["chunk_count"] >= 1
         assert data["status"] == "success"
+        retriever.ingest_document.assert_called_once_with(
+            source=pdf_path,
+            document_id="test_doc_01",
+            chunk_size=200,
+            chunk_overlap=50,
+        )
 
     def test_upload_non_pdf_rejected_with_400(self, client: TestClient):
         fake_file = io.BytesIO(b"not a pdf")
@@ -79,12 +97,23 @@ class TestIngestAPI:
     def test_upload_valid_pdf_multipart(self, client: TestClient, tmp_path: Path):
         pdf_path = _create_minimal_pdf(tmp_path / "uploaded_report.pdf", "Safety valve pressure: 130 PSI.")
         pdf_bytes = pdf_path.read_bytes()
-
-        response = client.post(
-            "/api/v1/ingest/upload",
-            files={"file": ("uploaded_report.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
-            data={"document_id": "uploaded_safety_01"},
+        retriever = MagicMock()
+        retriever.ingest_document.return_value = IngestResult(
+            document_id="uploaded_safety_01",
+            filename="uploaded_report.pdf",
+            page_count=1,
+            chunk_count=1,
+            ocr_pages=0,
+            duration_seconds=0.01,
+            status="success",
         )
+
+        with patch("backend.api.routes.get_retriever", return_value=retriever):
+            response = client.post(
+                "/api/v1/ingest/upload",
+                files={"file": ("uploaded_report.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
+                data={"document_id": "uploaded_safety_01"},
+            )
 
         assert response.status_code == 201
         data = response.json()
@@ -92,23 +121,31 @@ class TestIngestAPI:
         assert data["filename"] == "uploaded_report.pdf"
         assert data["chunk_count"] >= 1
         assert data["status"] == "success"
+        saved_path = retriever.ingest_document.call_args.kwargs["source"]
+        assert saved_path.name == "uploaded_report.pdf"
+        assert saved_path.exists()
 
 
 class TestKnowledgeSearchAPI:
     def test_search_endpoint_returns_ranked_results(self, client: TestClient, tmp_path: Path):
-        # Ingest a sample document first
-        pdf_path = _create_minimal_pdf(tmp_path / "search_doc.pdf", "Substation emergency shutdown protocol active.")
-        ingest_res = client.post(
-            "/api/v1/ingest",
-            json={"file_path": str(pdf_path), "document_id": "substation_01"},
-        )
-        assert ingest_res.status_code == 201
+        retriever = MagicMock()
+        retriever.search.return_value = [
+            {
+                "content": "Substation emergency shutdown protocol active.",
+                "source": "search_doc.pdf",
+                "page": 1,
+                "chunk_id": "substation_01-page-1-chunk-0",
+                "document_id": "substation_01",
+                "score": 0.98,
+                "metadata": {},
+            }
+        ]
 
-        # Search for content
-        response = client.post(
-            "/api/v1/knowledge/search",
-            json={"query": "substation emergency shutdown", "top_k": 3},
-        )
+        with patch("backend.api.routes.get_retriever", return_value=retriever):
+            response = client.post(
+                "/api/v1/knowledge/search",
+                json={"query": "substation emergency shutdown", "top_k": 3},
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -119,6 +156,12 @@ class TestKnowledgeSearchAPI:
         assert top_hit["source"] == "search_doc.pdf"
         assert "page" in top_hit
         assert "score" in top_hit
+        retriever.search.assert_called_once_with(
+            query="substation emergency shutdown",
+            top_k=3,
+            score_threshold=None,
+            filter_doc_id=None,
+        )
 
     def test_search_empty_query_returns_422(self, client: TestClient):
         response = client.post(

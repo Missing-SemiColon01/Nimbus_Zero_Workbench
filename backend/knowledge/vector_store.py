@@ -290,6 +290,12 @@ class VectorStore:
         self._ensure_collection()
         logger.info("Cleared all points from collection '%s'.", self.collection_name)
 
+    def close(self) -> None:
+        """Release local Qdrant resources such as file locks."""
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            close()
+
 
 # -- global singleton accessor -------------------------------------------------
 _VECTOR_STORE_INSTANCE: VectorStore | None = None
@@ -309,3 +315,11 @@ def get_vector_store(
             storage_path=storage_path,
         )
     return _VECTOR_STORE_INSTANCE
+
+
+def reset_vector_store() -> None:
+    """Close and clear the global VectorStore singleton."""
+    global _VECTOR_STORE_INSTANCE
+    if _VECTOR_STORE_INSTANCE is not None:
+        _VECTOR_STORE_INSTANCE.close()
+        _VECTOR_STORE_INSTANCE = None

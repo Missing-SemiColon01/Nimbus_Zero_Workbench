@@ -6,6 +6,7 @@ from backend.agents.industrial_workbench import IndustrialWorkbenchAgent
 from backend.agents.runtime import AgentRuntime
 from backend.api.routes import router
 from backend.core.config import get_settings
+from backend.knowledge.retriever import reset_retriever
 from backend.models.providers import ModelProviderRegistry, OllamaProvider
 from backend.models.registry import ModelRegistry
 from backend.models.router import ModelRouter
@@ -33,7 +34,10 @@ async def lifespan(app: FastAPI):
         app.state.tools,
         settings.agents_config,
     )
-    yield
+    try:
+        yield
+    finally:
+        reset_retriever()
 
 
 app = FastAPI(title="Sovereign AI Workbench", version="0.1.0", lifespan=lifespan)
