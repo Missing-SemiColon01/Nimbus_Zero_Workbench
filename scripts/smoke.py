@@ -39,7 +39,7 @@ def run(base_url: str) -> None:
 
         tools = _expect(client.get(f"{api}/tools"), 200, "tools")
         tool_names = {tool.get("name") for tool in tools if isinstance(tool, dict)}
-        required_tools = {"rag.search", "vision.analyze", "document.create", "presentation.create"}
+        required_tools = {"rag.search", "vision.analyze", "document.create", "presentation.create", "sandbox.execute"}
         missing_tools = sorted(required_tools.difference(tool_names))
         _print_check("required tools registered", not missing_tools, f"missing={missing_tools}" if missing_tools else "")
 
@@ -59,6 +59,9 @@ def run(base_url: str) -> None:
 
         artifacts = _expect(client.get(f"{api}/artifacts"), 200, "artifacts")
         _print_check("artifact list shape", isinstance(artifacts, list), f"{len(artifacts)} artifact(s)")
+
+        audit_events = _expect(client.get(f"{api}/audit/events?limit=5"), 200, "audit events")
+        _print_check("audit list shape", isinstance(audit_events, list), f"{len(audit_events)} event(s)")
 
 
 def main() -> int:

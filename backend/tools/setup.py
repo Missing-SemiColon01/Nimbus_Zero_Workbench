@@ -19,8 +19,10 @@ from backend.artifacts.validation_tool import ArtifactValidateTool
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
 from backend.models.providers import ModelProvider, ModelProviderRegistry, OllamaProvider
 from backend.models.registry import ModelRegistry
+from backend.sandbox.executor import build_executor
 from backend.tools.rag_tool import RAGSearchTool
 from backend.tools.registry import ToolRegistry
+from backend.tools.sandbox_tool import SandboxTool
 from backend.tools.vision_tool import VisionAnalyzeTool
 
 logger = logging.getLogger(__name__)
@@ -87,5 +89,18 @@ def build_tool_registry(
     ):
         registry.register(artifact_tool)
         logger.info("Registered tool: '%s'", artifact_tool.name)
+
+    # 4. Register sandbox execution. The executor uses Docker when available
+    # and a local mock fallback for development-only environments.
+    sandbox_tool = SandboxTool(
+        build_executor(
+            image=cfg.sandbox_image,
+            mem_limit=cfg.sandbox_mem_limit,
+            cpu_quota=cfg.sandbox_cpu_quota,
+            timeout_seconds=cfg.sandbox_timeout_seconds,
+        )
+    )
+    registry.register(sandbox_tool)
+    logger.info("Registered tool: '%s'", sandbox_tool.name)
 
     return registry

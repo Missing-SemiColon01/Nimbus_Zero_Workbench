@@ -16,6 +16,7 @@ agents:
       - presentation.create
       - pdf.create
       - artifact.validate
+      - sandbox.execute
     runtime:
       timeout: 60
       tool_timeout: 30
