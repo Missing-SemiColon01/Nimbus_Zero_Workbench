@@ -10,7 +10,9 @@ from fastapi.responses import FileResponse
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
 from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import NoCompatibleModelError
+from backend.sandbox.coding_workflow import CodingWorkflow
 from backend.schemas.artifacts import ArtifactInfo
+from backend.schemas.coding import CodingRunRequest, CodingRunResponse
 from backend.schemas.knowledge import (
     IngestRequest,
     IngestResponse,
@@ -202,6 +204,24 @@ async def run_sandbox(payload: SandboxRunRequest, request: Request):
         context={},
     )
     return _sandbox_response(result.output or {}, success=result.success, error=result.error)
+
+
+@router.post("/coding/run", response_model=CodingRunResponse)
+async def run_coding_workflow(payload: CodingRunRequest, request: Request):
+    """Generate code, verify it in the sandbox, and retry with failure feedback."""
+    workflow = CodingWorkflow(
+        router=request.app.state.runtime.router,
+        providers=request.app.state.runtime.providers,
+        tools=request.app.state.tools,
+        max_retries=request.app.state.settings.sandbox_max_retries,
+        timeout_seconds=request.app.state.settings.sandbox_timeout_seconds,
+    )
+    return await workflow.run(
+        payload.requirement,
+        payload.test_code,
+        max_retries=payload.max_retries,
+        timeout_seconds=payload.timeout_seconds,
+    )
 
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
