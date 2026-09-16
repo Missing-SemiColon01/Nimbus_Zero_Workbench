@@ -40,3 +40,6 @@ torch>=2.2,<3
 python-docx>=1.1,<2
 python-pptx>=1.0,<2
 openpyxl>=3.1,<4
+
+# ── Dev 4B — Test infrastructure ──────────────────────────────────────────────
+pytest-asyncio>=0.23,<1      # async test runner (required for all async tool/RAG/vision tests)
