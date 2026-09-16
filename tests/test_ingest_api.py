@@ -93,6 +93,68 @@ class TestIngestAPI:
         assert data["chunk_count"] >= 1
         assert data["status"] == "success"
 
+    def test_upload_empty_pdf_rejected(self, client: TestClient):
+        """Empty PDF bytes should be rejected cleanly (either 400 or 500, not a crash)."""
+        empty_pdf = io.BytesIO(b"")
+        response = client.post(
+            "/api/v1/ingest/upload",
+            files={"file": ("empty.pdf", empty_pdf, "application/pdf")},
+        )
+        # Accept 400 (bad input) or 500 (parse failure) — both are non-crash responses
+        assert response.status_code in (400, 422, 500)
+
+
+class TestStoragePersistence:
+    """
+    Dev 4B Phase 2 — Storage Reliability.
+    Verifies uploaded PDFs are actually written to data/uploads/ on disk
+    and persist after the request completes.
+    """
+
+    def test_upload_file_persists_on_disk(self, client: TestClient, tmp_path: Path):
+        """After a successful upload the file must exist in data/uploads/."""
+        filename = "persist_check.pdf"
+        pdf_bytes = _create_minimal_pdf(tmp_path / filename, "Persistence check content.").read_bytes()
+
+        response = client.post(
+            "/api/v1/ingest/upload",
+            files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+            data={"document_id": "persist_check_01"},
+        )
+        assert response.status_code == 201
+
+        saved_path = Path("data/uploads") / filename
+        assert saved_path.exists(), f"Expected file at {saved_path} — not found"
+        assert saved_path.stat().st_size > 0, "Saved file is unexpectedly empty"
+
+    def test_upload_overwrites_existing_file(self, client: TestClient, tmp_path: Path):
+        """Uploading the same filename twice should overwrite cleanly with no error."""
+        filename = "overwrite_check.pdf"
+
+        for i, content in enumerate(["First upload content.", "Second upload — overwrite."]):
+            pdf_bytes = _create_minimal_pdf(tmp_path / f"v{i}.pdf", content).read_bytes()
+            response = client.post(
+                "/api/v1/ingest/upload",
+                files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+                data={"document_id": f"overwrite_{i}"},
+            )
+            assert response.status_code == 201
+
+        saved_path = Path("data/uploads") / filename
+        assert saved_path.exists()
+
+    def test_uploads_dir_created_automatically(self, client: TestClient, tmp_path: Path):
+        """The uploads directory is created by the API automatically (mkdir parents=True)."""
+        filename = "dir_creation_check.pdf"
+        pdf_bytes = _create_minimal_pdf(tmp_path / filename, "Dir creation check.").read_bytes()
+
+        response = client.post(
+            "/api/v1/ingest/upload",
+            files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+        )
+        assert response.status_code == 201
+        assert Path("data/uploads").is_dir()
+
 
 class TestKnowledgeSearchAPI:
     def test_search_endpoint_returns_ranked_results(self, client: TestClient, tmp_path: Path):
