@@ -122,12 +122,14 @@ class IndustrialWorkbenchAgent:
         *,
         images: list[str] | None = None,
         documents: list[str] | None = None,
+        approved_tools: set[str] | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         return await self.runtime.run(
             user_request,
             capabilities,
             modality,
             tool_allowlist=set(self.config.tools) if self.config.tools is not None else None,
+            approved_tools=approved_tools,
             images=images,
             documents=documents,
             system_prompt=self.config.system_prompt,

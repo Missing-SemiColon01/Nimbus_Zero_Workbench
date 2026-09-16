@@ -45,6 +45,39 @@ def _safe_upload_target(uploads_dir: Path, filename: str) -> Path:
     return uploads_dir / safe_name
 
 
+def _artifact_info(file_path: Path, *, artifacts_dir: Path, previews_dir: Path) -> ArtifactInfo:
+    """Build API download metadata for a generated artifact path."""
+    ext = file_path.suffix.lstrip(".").lower()
+    stat = file_path.stat()
+    preview_url = None
+    preview_candidate = previews_dir / f"{file_path.stem}-page-1.png"
+    if preview_candidate.exists():
+        preview_url = f"/api/v1/artifacts/previews/{preview_candidate.name}"
+
+    return ArtifactInfo(
+        filename=file_path.name,
+        file_type=ext,
+        size_bytes=stat.st_size,
+        download_url=f"/api/v1/artifacts/{file_path.name}/download",
+        preview_url=preview_url,
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+    )
+
+
+def _task_artifact_infos(settings: Any, artifact_paths: list[str]) -> list[ArtifactInfo]:
+    """Convert task artifact paths to downloadable metadata, ignoring stale paths."""
+    artifacts_dir: Path = settings.data_dir / "artifacts"
+    previews_dir: Path = settings.data_dir / "tmp" / "artifact-previews"
+    items: list[ArtifactInfo] = []
+    for artifact_path in artifact_paths:
+        try:
+            file_path = _safe_resolve(artifacts_dir, Path(artifact_path).name)
+        except HTTPException:
+            continue
+        items.append(_artifact_info(file_path, artifacts_dir=artifacts_dir, previews_dir=previews_dir))
+    return items
+
+
 # -- System & Health -----------------------------------------------------------
 
 @router.get("/health")
@@ -103,6 +136,7 @@ async def create_task(payload: TaskCreate, request: Request):
             payload.modality,
             images=payload.images,
             documents=documents,
+            approved_tools=payload.approved_tools,
         )
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -125,6 +159,7 @@ async def create_task(payload: TaskCreate, request: Request):
         response=state.final_response or model_response.content,
         execution_duration=state.execution_duration,
         artifacts=state.artifacts,
+        generated_artifacts=_task_artifact_infos(request.app.state.settings, state.artifacts),
         tool_results=state.tool_results,
         errors=state.errors,
         approval_required=state.approval_required,
@@ -253,24 +288,7 @@ async def list_artifacts(request: Request):
     items: list[ArtifactInfo] = []
     for file_path in artifacts_dir.iterdir():
         if file_path.is_file():
-            ext = file_path.suffix.lstrip(".").lower()
-            stat = file_path.stat()
-            preview_url = None
-            if previews_dir.exists():
-                preview_candidate = previews_dir / f"{file_path.stem}-page-1.png"
-                if preview_candidate.exists():
-                    preview_url = f"/api/v1/artifacts/previews/{preview_candidate.name}"
-
-            items.append(
-                ArtifactInfo(
-                    filename=file_path.name,
-                    file_type=ext,
-                    size_bytes=stat.st_size,
-                    download_url=f"/api/v1/artifacts/{file_path.name}/download",
-                    preview_url=preview_url,
-                    modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
-                )
-            )
+            items.append(_artifact_info(file_path, artifacts_dir=artifacts_dir, previews_dir=previews_dir))
 
     items.sort(key=lambda item: item.modified_at, reverse=True)
     return items

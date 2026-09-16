@@ -32,6 +32,7 @@ def test_list_artifacts_with_files_and_previews(tmp_path: Path):
     # Create dummy artifact and preview
     pdf_file = artifacts_dir / "approval-note.pdf"
     pdf_file.write_bytes(b"%PDF-1.4 dummy content")
+    (artifacts_dir / "nested-dir").mkdir()
 
     preview_file = previews_dir / "approval-note-page-1.png"
     preview_file.write_bytes(b"\x89PNG dummy preview")
