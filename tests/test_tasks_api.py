@@ -67,7 +67,8 @@ async def test_create_task_generates_response_with_selected_model():
     assert len(provider.calls) == 1
     model, request = provider.calls[0]
     assert model.id == "reasoning"
-    assert request.prompt == "Explain model routing"
+    assert "Industrial Workbench Agent" in request.prompt
+    assert request.prompt.endswith("Explain model routing")
 
 
 @pytest.mark.asyncio

@@ -10,10 +10,11 @@ TASK_TYPE_CAPABILITIES: dict[str, set[str]] = {
     "debugging": {"debugging"},
     "vision": {"vision"},
     "document_understanding": {"document_understanding"},
+    "report": {"reasoning"},
 }
 
 TaskType = Literal[
-    "reasoning", "planning", "coding", "debugging", "vision", "document_understanding"
+    "reasoning", "planning", "coding", "debugging", "vision", "document_understanding", "report"
 ]
 
 

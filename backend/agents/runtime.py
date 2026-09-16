@@ -57,6 +57,7 @@ class AgentGraphState(TypedDict):
 
     task_id: str
     user_prompt: str
+    system_prompt: str | None
     selected_model: str | None
     messages: list[str]
     images: list[str]
@@ -122,6 +123,7 @@ class AgentRuntime:
         approved_tools: set[str] | None = None,
         images: list[str] | None = None,
         documents: list[str] | None = None,
+        system_prompt: str | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         """Run the agent workflow for one task with reliability controls."""
         start_time = time.perf_counter()
@@ -149,6 +151,7 @@ class AgentRuntime:
         initial_state: AgentGraphState = {
             "task_id": resolved_task_id,
             "user_prompt": user_request,
+            "system_prompt": system_prompt.strip() if isinstance(system_prompt, str) and system_prompt.strip() else None,
             "selected_model": None,
             "messages": initial_messages,
             "images": resolved_images,
@@ -377,7 +380,7 @@ class AgentRuntime:
         step_count, node_history = self._track_step(state, "generate_response")
 
         model_request = ModelRequest(
-            prompt=state["user_prompt"],
+            prompt=self._model_prompt(state),
             required_capabilities=state["required_capabilities"],
             required_modality=state["modality"],
             images=state.get("images", []),
@@ -480,7 +483,7 @@ class AgentRuntime:
                 if self._requires_approval(result)
             )
             request = ModelRequest(
-                prompt=self._prompt_with_tool_results(state["user_prompt"], response, round_results),
+                prompt=self._prompt_with_tool_results(self._model_prompt(state), response, round_results),
                 required_capabilities=initial_request.required_capabilities,
                 required_modality=initial_request.required_modality,
                 images=initial_request.images,
@@ -491,6 +494,14 @@ class AgentRuntime:
             response = await self.providers.generate(model, request)
 
         raise ProviderError(f"Maximum tool rounds ({self.config.max_tool_rounds}) exceeded")
+
+    @staticmethod
+    def _model_prompt(state: AgentGraphState) -> str:
+        """Put the configured agent instruction ahead of the unmodified user request."""
+        system_prompt = state.get("system_prompt")
+        if not system_prompt:
+            return state["user_prompt"]
+        return f"System instructions:\n{system_prompt}\n\nUser request:\n{state['user_prompt']}"
 
     def _detect_tool_calls(self, response: ModelResponse) -> list[ToolCall]:
         if response.tool_calls:

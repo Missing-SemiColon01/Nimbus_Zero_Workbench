@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     data_dir: Path = Path("data")
     models_config: Path = Path("configs/models.yaml")
+    agents_config: Path = Path("configs/agents.yaml")
     ollama_base_url: str = "http://ollama:11434"
     sovereign_mode: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
