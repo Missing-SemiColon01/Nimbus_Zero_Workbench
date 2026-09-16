@@ -119,11 +119,37 @@ class TestIngestAPI:
         data = response.json()
         assert data["document_id"] == "uploaded_safety_01"
         assert data["filename"] == "uploaded_report.pdf"
+        assert Path(data["document_path"]).name == "uploaded_report.pdf"
+        assert Path(data["document_path"]).exists()
         assert data["chunk_count"] >= 1
         assert data["status"] == "success"
         saved_path = retriever.ingest_document.call_args.kwargs["source"]
         assert saved_path.name == "uploaded_report.pdf"
         assert saved_path.exists()
+
+    def test_upload_sanitizes_filename(self, client: TestClient, tmp_path: Path):
+        pdf_path = _create_minimal_pdf(tmp_path / "unsafe.pdf")
+        retriever = MagicMock()
+        retriever.ingest_document.return_value = IngestResult(
+            document_id="unsafe",
+            filename="unsafe.pdf",
+            page_count=1,
+            chunk_count=1,
+            ocr_pages=0,
+            duration_seconds=0.01,
+            status="success",
+        )
+
+        with patch("backend.api.routes.get_retriever", return_value=retriever):
+            response = client.post(
+                "/api/v1/ingest/upload",
+                files={"file": ("../unsafe.pdf", io.BytesIO(pdf_path.read_bytes()), "application/pdf")},
+            )
+
+        assert response.status_code == 201
+        saved_path = retriever.ingest_document.call_args.kwargs["source"]
+        assert saved_path.name == "unsafe.pdf"
+        assert saved_path.parent.name == "uploads"
 
 
 class TestKnowledgeSearchAPI:

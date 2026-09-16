@@ -25,6 +25,10 @@ class TaskCreate(BaseModel):
     modality: str = "text"
     images: list[str] = Field(default_factory=list, description="Optional base64-encoded image inputs.")
     documents: list[str] = Field(default_factory=list, description="Optional encoded document inputs.")
+    document_paths: list[str] = Field(
+        default_factory=list,
+        description="Optional local uploaded document paths returned by /ingest/upload.",
+    )
 
     @property
     def required_capabilities(self) -> set[str]:

@@ -1,5 +1,6 @@
 import httpx
 import pytest
+from pathlib import Path
 
 from backend.main import app
 from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse, ToolCall
@@ -183,6 +184,56 @@ async def test_create_task_maps_task_type_to_capability():
     assert response.status_code == 201
     assert response.json()["selected_model"] == "coding"
     assert provider.calls[0][1].required_capabilities == {"coding"}
+
+
+@pytest.mark.asyncio
+async def test_create_task_accepts_uploaded_document_path(tmp_path: Path):
+    provider = FakeProvider()
+    async with app.router.lifespan_context(app):
+        app.state.settings.data_dir = tmp_path
+        uploads_dir = tmp_path / "uploads"
+        uploads_dir.mkdir(parents=True)
+        uploaded_pdf = uploads_dir / "inspection.pdf"
+        uploaded_pdf.write_bytes(b"%PDF-1.4 test")
+
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={
+                    "request": "Find safety issues in this inspection report",
+                    "document_paths": [str(uploaded_pdf)],
+                },
+            )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["selected_model"] == "vision"
+    model, request = provider.calls[0]
+    assert model.id == "vision"
+    assert request.required_modality == "document"
+    assert request.documents == [str(uploaded_pdf.resolve())]
+    assert "document_understanding" in request.required_capabilities
+
+
+@pytest.mark.asyncio
+async def test_create_task_rejects_document_path_outside_uploads(tmp_path: Path):
+    outside_pdf = tmp_path / "outside.pdf"
+    outside_pdf.write_bytes(b"%PDF-1.4 test")
+
+    async with app.router.lifespan_context(app):
+        app.state.settings.data_dir = tmp_path / "data"
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={
+                    "request": "Analyze this document",
+                    "document_paths": [str(outside_pdf)],
+                },
+            )
+
+    assert response.status_code == 404
+    assert "document not found" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
