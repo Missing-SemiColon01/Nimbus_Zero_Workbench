@@ -10,6 +10,7 @@ from backend.knowledge.retriever import reset_retriever
 from backend.models.providers import ModelProviderRegistry, OllamaProvider
 from backend.models.registry import ModelRegistry
 from backend.models.router import ModelRouter
+from backend.security.audit import AuditLogger
 from backend.tools.setup import build_tool_registry
 
 
@@ -17,6 +18,7 @@ from backend.tools.setup import build_tool_registry
 async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
+    app.state.audit = AuditLogger(settings.data_dir)
     app.state.registry = ModelRegistry(settings.models_config)
     providers = ModelProviderRegistry({"ollama": OllamaProvider(settings.ollama_base_url)})
     app.state.tools = build_tool_registry(

@@ -131,6 +131,13 @@ async def list_tools(request: Request):
     ]
 
 
+@router.get("/audit/events")
+async def audit_events(request: Request, limit: int = 100):
+    """Return recent local audit events for demo and verification."""
+    bounded_limit = max(1, min(limit, 500))
+    return request.app.state.audit.tail(bounded_limit)
+
+
 # -- Tasks API -----------------------------------------------------------------
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
@@ -203,7 +210,21 @@ async def run_sandbox(payload: SandboxRunRequest, request: Request):
         },
         context={},
     )
-    return _sandbox_response(result.output or {}, success=result.success, error=result.error)
+    response = _sandbox_response(result.output or {}, success=result.success, error=result.error)
+    request.app.state.audit.record(
+        "sandbox.run",
+        {
+            "language": payload.language,
+            "timeout_seconds": payload.timeout_seconds,
+            "network_disabled": True,
+            "success": response.success,
+            "exit_code": response.exit_code,
+            "test_passed": response.test_passed,
+            "timed_out": response.timed_out,
+            "error": result.error,
+        },
+    )
+    return response
 
 
 @router.post("/coding/run", response_model=CodingRunResponse)
@@ -216,12 +237,26 @@ async def run_coding_workflow(payload: CodingRunRequest, request: Request):
         max_retries=request.app.state.settings.sandbox_max_retries,
         timeout_seconds=request.app.state.settings.sandbox_timeout_seconds,
     )
-    return await workflow.run(
+    result = await workflow.run(
         payload.requirement,
         payload.test_code,
         max_retries=payload.max_retries,
         timeout_seconds=payload.timeout_seconds,
     )
+    request.app.state.audit.record(
+        "coding.run",
+        {
+            "status": result.status,
+            "selected_model": result.selected_model,
+            "provider": result.provider,
+            "attempted_models": result.attempted_models,
+            "attempt_count": len(result.attempts),
+            "test_passed": any(attempt.test_passed for attempt in result.attempts),
+            "errors": result.errors,
+        },
+        task_id=result.task_id,
+    )
+    return result
 
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
