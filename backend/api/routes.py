@@ -68,7 +68,7 @@ async def list_tools(request: Request):
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreate, request: Request):
     try:
-        state, model_response = await request.app.state.runtime.run(
+        state, model_response = await request.app.state.agent.run(
             payload.request,
             payload.required_capabilities,
             payload.modality,

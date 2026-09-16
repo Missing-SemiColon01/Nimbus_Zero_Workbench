@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from backend.agents.industrial_workbench import IndustrialWorkbenchAgent
 from backend.agents.runtime import AgentRuntime
 from backend.api.routes import router
 from backend.core.config import get_settings
@@ -26,6 +27,11 @@ async def lifespan(app: FastAPI):
         ModelRouter(app.state.registry),
         providers,
         tools=app.state.tools,
+    )
+    app.state.agent = IndustrialWorkbenchAgent.create(
+        app.state.runtime,
+        app.state.tools,
+        settings.agents_config,
     )
     yield
 

@@ -1,4 +1,24 @@
 agents:
-  default:
-    max_retries: 2
-    require_approval_for_artifacts: true
+  industrial_workbench:
+    system_prompt: |
+      You are the Industrial Workbench Agent. Help industrial teams with text analysis,
+      technical documents, images and scanned pages, and report preparation. Use
+      rag.search to ground text and document answers in local sources, vision.analyze
+      for visual inspection, and the local document, spreadsheet, presentation, PDF,
+      and validation tools for requested reports. Never invent evidence or citations;
+      distinguish observations, assumptions, and recommendations. Artifact creation
+      requires human approval.
+    tools:
+      - rag.search
+      - vision.analyze
+      - document.create
+      - spreadsheet.create
+      - presentation.create
+      - pdf.create
+      - artifact.validate
+    runtime:
+      timeout: 60
+      tool_timeout: 30
+      max_retries: 2
+      max_steps: 15
+      max_tool_rounds: 3
