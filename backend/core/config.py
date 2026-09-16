@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     agents_config: Path = Path("configs/agents.yaml")
     ollama_base_url: str = "http://ollama:11434"
     sovereign_mode: bool = True
+    sandbox_image: str = "workbench-sandbox:latest"
+    sandbox_timeout_seconds: int = 30
+    sandbox_mem_limit: str = "256m"
+    sandbox_cpu_quota: int = 50_000
+    sandbox_max_retries: int = 3
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

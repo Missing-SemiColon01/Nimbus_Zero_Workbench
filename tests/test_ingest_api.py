@@ -33,6 +33,20 @@ def _create_minimal_pdf(path: Path, text: str = "Inspection findings: valve inta
     return path
 
 
+def _successful_retriever(document_id: str, filename: str) -> MagicMock:
+    retriever = MagicMock()
+    retriever.ingest_document.return_value = IngestResult(
+        document_id=document_id,
+        filename=filename,
+        page_count=1,
+        chunk_count=1,
+        ocr_pages=0,
+        duration_seconds=0.01,
+        status="success",
+    )
+    return retriever
+
+
 @pytest.fixture
 def client():
     with TestClient(app) as test_client:
@@ -173,15 +187,17 @@ class TestStoragePersistence:
         """After a successful upload the file must exist in data/uploads/."""
         filename = "persist_check.pdf"
         pdf_bytes = _create_minimal_pdf(tmp_path / filename, "Persistence check content.").read_bytes()
+        retriever = _successful_retriever("persist_check_01", filename)
 
-        response = client.post(
-            "/api/v1/ingest/upload",
-            files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
-            data={"document_id": "persist_check_01"},
-        )
+        with patch("backend.api.routes.get_retriever", return_value=retriever):
+            response = client.post(
+                "/api/v1/ingest/upload",
+                files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+                data={"document_id": "persist_check_01"},
+            )
         assert response.status_code == 201
 
-        saved_path = Path("data/uploads") / filename
+        saved_path = Path(response.json()["document_path"])
         assert saved_path.exists(), f"Expected file at {saved_path} — not found"
         assert saved_path.stat().st_size > 0, "Saved file is unexpectedly empty"
 
@@ -191,25 +207,29 @@ class TestStoragePersistence:
 
         for i, content in enumerate(["First upload content.", "Second upload — overwrite."]):
             pdf_bytes = _create_minimal_pdf(tmp_path / f"v{i}.pdf", content).read_bytes()
-            response = client.post(
-                "/api/v1/ingest/upload",
-                files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
-                data={"document_id": f"overwrite_{i}"},
-            )
+            retriever = _successful_retriever(f"overwrite_{i}", filename)
+            with patch("backend.api.routes.get_retriever", return_value=retriever):
+                response = client.post(
+                    "/api/v1/ingest/upload",
+                    files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+                    data={"document_id": f"overwrite_{i}"},
+                )
             assert response.status_code == 201
 
-        saved_path = Path("data/uploads") / filename
+        saved_path = Path(response.json()["document_path"])
         assert saved_path.exists()
 
     def test_uploads_dir_created_automatically(self, client: TestClient, tmp_path: Path):
         """The uploads directory is created by the API automatically (mkdir parents=True)."""
         filename = "dir_creation_check.pdf"
         pdf_bytes = _create_minimal_pdf(tmp_path / filename, "Dir creation check.").read_bytes()
+        retriever = _successful_retriever("dir_creation_check", filename)
 
-        response = client.post(
-            "/api/v1/ingest/upload",
-            files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
-        )
+        with patch("backend.api.routes.get_retriever", return_value=retriever):
+            response = client.post(
+                "/api/v1/ingest/upload",
+                files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+            )
         assert response.status_code == 201
         assert Path("data/uploads").is_dir()
 
