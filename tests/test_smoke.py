@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from scripts.dev4_smoke import _expect
+from scripts.smoke import _expect
 
 
 def test_expect_returns_json_for_expected_status():

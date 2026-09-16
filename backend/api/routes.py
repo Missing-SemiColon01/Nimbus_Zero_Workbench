@@ -18,6 +18,7 @@ from backend.schemas.knowledge import (
     KnowledgeSearchResponse,
     ToolInfo,
 )
+from backend.schemas.sandbox import SandboxRunRequest, SandboxRunResponse
 from backend.schemas.tasks import TaskCreate, TaskResponse
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,18 @@ def _safe_upload_target(uploads_dir: Path, filename: str) -> Path:
     if not safe_name or safe_name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Uploaded file must have a valid filename.")
     return uploads_dir / safe_name
+
+
+def _sandbox_response(output: dict[str, Any], *, success: bool, error: str | None = None) -> SandboxRunResponse:
+    return SandboxRunResponse(
+        exit_code=int(output.get("exit_code", -1)),
+        stdout=str(output.get("stdout", "")),
+        stderr=str(output.get("stderr", error or "")),
+        test_passed=bool(output.get("test_passed", False)),
+        timed_out=bool(output.get("timed_out", False)),
+        success=success,
+        summary=str(output.get("summary", error or "")),
+    )
 
 
 def _artifact_info(file_path: Path, *, artifacts_dir: Path, previews_dir: Path) -> ArtifactInfo:
@@ -125,6 +138,7 @@ async def create_task(payload: TaskCreate, request: Request):
         str(_resolve_inside(uploads_dir, document_path))
         for document_path in payload.document_paths
     ]
+
     documents = [*payload.documents, *document_paths]
     required_capabilities = payload.required_capabilities
     if documents and payload.task_type is None and not payload.capabilities:
@@ -169,6 +183,26 @@ async def create_task(payload: TaskCreate, request: Request):
 
 
 # -- Knowledge & Ingest API (Day 2 — Task 2.5) ----------------------------------
+
+@router.post("/sandbox/run", response_model=SandboxRunResponse)
+async def run_sandbox(payload: SandboxRunRequest, request: Request):
+    """Directly execute Python code through the registered sandbox tool."""
+    try:
+        tool = request.app.state.tools.get("sandbox.execute")
+    except KeyError as error:
+        raise HTTPException(status_code=503, detail="Sandbox tool is not registered.") from error
+
+    result = await tool.execute(
+        {
+            "code": payload.code,
+            "test_code": payload.test_code,
+            "language": payload.language,
+            "timeout_seconds": payload.timeout_seconds,
+        },
+        context={},
+    )
+    return _sandbox_response(result.output or {}, success=result.success, error=result.error)
+
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
 async def ingest_file_path(payload: IngestRequest, request: Request):
