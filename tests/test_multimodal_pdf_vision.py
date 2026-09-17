@@ -254,6 +254,7 @@ class TestIndustrialWorkbenchAgentMultimodalReturn:
             "presentation.create",
             "pdf.create",
             "artifact.validate",
+            "sandbox.execute",
         ):
             tools.register(NamedTool(tool_name))  # type: ignore
 

@@ -11,7 +11,6 @@ from typing import Any
 from backend.models.contracts import ModelRequest
 from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import NoCompatibleModelError, ModelRouter
-from backend.sandbox.contracts import SandboxRequest
 from backend.tools.registry import ToolRegistry
 
 
