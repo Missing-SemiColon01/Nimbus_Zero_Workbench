@@ -51,7 +51,18 @@ class DockerSandboxExecutor:
         except ImportError as exc:
             raise RuntimeError("docker Python SDK is required for DockerSandboxExecutor.") from exc
 
-        client = docker.from_env()
+        try:
+            client = docker.from_env()
+        except Exception as exc:
+            logger.error("Failed to initialize Docker client: %s", exc)
+            return SandboxResult(
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                test_passed=False,
+                error=f"Docker client initialization failed: {exc}",
+            )
+
         timeout = request.timeout_seconds or self.timeout_seconds
 
         with tempfile.TemporaryDirectory(prefix="workbench_sandbox_") as tmpdir:
@@ -61,24 +72,35 @@ class DockerSandboxExecutor:
 
             container = None
             try:
-                container = client.containers.run(
-                    self.image,
-                    command=command,
-                    volumes={
-                        str(workspace): {
-                            "bind": "/workspace",
-                            "mode": "rw",
-                        }
-                    },
-                    working_dir="/workspace",
-                    network_disabled=True,
-                    mem_limit=self.mem_limit,
-                    cpu_quota=self.cpu_quota,
-                    read_only=False,
-                    remove=False,
-                    detach=True,
-                    user="runner",
-                )
+                try:
+                    container = client.containers.run(
+                        self.image,
+                        command=command,
+                        volumes={
+                            str(workspace): {
+                                "bind": "/workspace",
+                                "mode": "rw",
+                            }
+                        },
+                        working_dir="/workspace",
+                        network_disabled=True,
+                        mem_limit=self.mem_limit,
+                        cpu_quota=self.cpu_quota,
+                        read_only=False,
+                        remove=False,
+                        detach=True,
+                        user="runner",
+                    )
+                except Exception as exc:
+                    logger.error("Failed to run Docker container: %s", exc)
+                    return SandboxResult(
+                        exit_code=-1,
+                        stdout="",
+                        stderr="",
+                        test_passed=False,
+                        error=f"Docker container execution failed: {exc}",
+                    )
+
                 try:
                     result = container.wait(timeout=timeout)
                     exit_code = int(result.get("StatusCode", 1))

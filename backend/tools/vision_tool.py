@@ -137,7 +137,7 @@ class VisionAnalyzeTool(Tool):
                 "default": DEFAULT_VISION_PROMPT,
             },
         },
-        "required": ["image_path"],
+        "required": [],
     }
 
     def __init__(
