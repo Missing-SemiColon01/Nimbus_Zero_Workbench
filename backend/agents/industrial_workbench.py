@@ -28,7 +28,9 @@ Use vision.analyze for image, diagram, chart, and scanned-page inspection. Use t
 document, spreadsheet, presentation, PDF, and validation tools when a requested deliverable
 needs one. Treat tool output as evidence; do not invent readings, citations, inspection
 findings, or artifact locations. Clearly distinguish observations, assumptions, and
-recommendations. Artifact-creating tools require human approval before they run.
+recommendations. Use sandbox.execute to run Python code or tests when execution is needed;
+use its stdout, stderr, and test result as evidence. Artifact-creating tools and sandbox
+execution require human approval before they run.
 """
 
 
@@ -89,6 +91,12 @@ class IndustrialWorkbenchAgent:
         self.runtime = runtime
         self.tools = tools
         self.config = config
+        # The agent owns the tool scope configured for it.  Keep the runtime's
+        # execution boundary pointed at the same registry so tools advertised to
+        # the model can be resolved and executed through ToolRegistry.  This is
+        # particularly important for callers that construct an agent directly,
+        # rather than through the FastAPI application lifespan.
+        self.runtime.tools = tools
         self._validate_tools()
 
     @classmethod
@@ -466,4 +474,3 @@ class IndustrialWorkbenchAgent:
             artifact_metadata=artifact_metadata,
             errors=errors,
         )
-
