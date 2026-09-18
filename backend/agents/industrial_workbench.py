@@ -30,8 +30,7 @@ document, spreadsheet, presentation, PDF, and validation tools when a requested 
 needs one. Treat tool output as evidence; do not invent readings, citations, inspection
 findings, or artifact locations. Clearly distinguish observations, assumptions, and
 recommendations. Use sandbox.execute to run Python code or tests when execution is needed;
-use its stdout, stderr, and test result as evidence. Artifact-creating tools and sandbox
-execution require human approval before they run.
+use its stdout, stderr, and test result as evidence.
 """
 
 
