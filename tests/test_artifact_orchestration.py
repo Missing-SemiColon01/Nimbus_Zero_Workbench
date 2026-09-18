@@ -128,13 +128,13 @@ def _build_agent(
     ):
         tools.register(NamedTool(name))
 
-    if extra_tools:
-        for tool in extra_tools.values():
-            tools.register(tool)
-    else:
-        # Register default artifact tools so agent validation passes.
-        for name in ("document.create", "presentation.create", "pdf.create", "spreadsheet.create"):
-            tools.register(NamedTool(name))
+    # The agent configuration allows all four artifact tools.  Register the
+    # complete set for every fixture, then replace a named tool with the fake
+    # supplied by the individual test.
+    for name in ("document.create", "presentation.create", "pdf.create", "spreadsheet.create"):
+        tools.register(NamedTool(name))
+    for tool in (extra_tools or {}).values():
+        tools.register(tool)
 
     return IndustrialWorkbenchAgent.create(runtime, tools, _agents_yaml())
 
@@ -597,4 +597,3 @@ class TestExtractToolArguments:
     def test_empty_content_returns_none(self):
         resp = ModelResponse(content="", model_id="test")
         assert IndustrialWorkbenchAgent._extract_tool_arguments(resp, "document.create") is None
-
