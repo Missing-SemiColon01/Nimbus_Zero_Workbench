@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from backend.agents.artifact_detection import ArtifactIntent, detect_artifact_intent
 from backend.agents.runtime import AgentRuntime, RuntimeConfig
 from backend.agents.state import AgentState
 from backend.models.contracts import ModelResponse
+from backend.schemas.artifact_result import ArtifactGenerationResult
 from backend.tools.registry import ToolRegistry
 
 
@@ -24,7 +28,9 @@ Use vision.analyze for image, diagram, chart, and scanned-page inspection. Use t
 document, spreadsheet, presentation, PDF, and validation tools when a requested deliverable
 needs one. Treat tool output as evidence; do not invent readings, citations, inspection
 findings, or artifact locations. Clearly distinguish observations, assumptions, and
-recommendations. Artifact-creating tools require human approval before they run.
+recommendations. Use sandbox.execute to run Python code or tests when execution is needed;
+use its stdout, stderr, and test result as evidence. Artifact-creating tools and sandbox
+execution require human approval before they run.
 """
 
 
@@ -85,6 +91,12 @@ class IndustrialWorkbenchAgent:
         self.runtime = runtime
         self.tools = tools
         self.config = config
+        # The agent owns the tool scope configured for it.  Keep the runtime's
+        # execution boundary pointed at the same registry so tools advertised to
+        # the model can be resolved and executed through ToolRegistry.  This is
+        # particularly important for callers that construct an agent directly,
+        # rather than through the FastAPI application lifespan.
+        self.runtime.tools = tools
         self._validate_tools()
 
     @classmethod
@@ -188,4 +200,277 @@ class IndustrialWorkbenchAgent:
             images=images,
             documents=documents,
             system_prompt=self.config.system_prompt,
+        )
+
+    # -- Artifact-generation orchestration -------------------------------------
+
+    async def generate_artifact(
+        self,
+        user_request: str,
+        *,
+        task_type: str | None = None,
+        approved_tools: set[str] | None = None,
+    ) -> ArtifactGenerationResult:
+        """Detect, generate, and produce a downloadable artifact in one call.
+
+        Orchestration flow
+        ------------------
+        1. Detect intent   → identify artifact type and target tool.
+        2. Generate content → ask the model for structured JSON matching the tool schema.
+        3. Extract result   → check if the runtime already called the tool, or parse JSON.
+        4. Execute tool     → call the artifact tool if not already executed.
+        5. Validate result  → verify success and build the typed response.
+
+        Parameters
+        ----------
+        user_request:
+            The raw natural-language request from the user.
+        task_type:
+            Optional explicit task type (``"report"``, ``"artifact"``, etc.).
+        approved_tools:
+            Tool names explicitly pre-approved by a human for this run.
+        """
+        task_id = str(uuid.uuid4())
+
+        # 1. Detect artifact intent.
+        intent = detect_artifact_intent(user_request, task_type)
+        if intent is None:
+            return ArtifactGenerationResult(
+                task_id=task_id,
+                artifact_type="unknown",
+                status="failed",
+                errors=["Could not determine artifact type from the request."],
+            )
+
+        # 2. Verify the target tool is registered and allowed.
+        error = self._check_tool_available(intent)
+        if error is not None:
+            return ArtifactGenerationResult(
+                task_id=task_id,
+                artifact_type=intent.artifact_type,
+                status="failed",
+                errors=[error],
+            )
+
+        # 3. Generate content through the model (may trigger tool calls via runtime).
+        tool_schema = self._tool_parameter_schema(intent.tool_name)
+        generation_prompt = self._artifact_generation_prompt(user_request, intent, tool_schema)
+
+        # Ensure the target tool is approved so the runtime can call it.
+        effective_approved = set(approved_tools or ())
+        effective_approved.add(intent.tool_name)
+
+        try:
+            state, model_response = await self.run(
+                generation_prompt,
+                {"reasoning"},
+                approved_tools=effective_approved,
+            )
+        except Exception as exc:
+            return ArtifactGenerationResult(
+                task_id=task_id,
+                artifact_type=intent.artifact_type,
+                status="failed",
+                errors=[f"Model generation failed: {exc}"],
+            )
+
+        if state.status == "failed":
+            return ArtifactGenerationResult(
+                task_id=task_id,
+                artifact_type=intent.artifact_type,
+                status="failed",
+                errors=state.errors or ["Model generation failed."],
+            )
+
+        # 4. Check if the runtime already executed the artifact tool.
+        tool_result = self._find_tool_result(state, intent.tool_name)
+
+        if tool_result is None:
+            # The model returned content but didn't call the tool — parse and call manually.
+            tool_result = await self._parse_and_execute_tool(
+                model_response, intent, task_id,
+            )
+
+        # 5. Build the typed response.
+        return self._build_result(task_id, intent, tool_result)
+
+    # -- Private helpers -------------------------------------------------------
+
+    def _check_tool_available(self, intent: ArtifactIntent) -> str | None:
+        """Return an error string if the target tool is unavailable, else ``None``."""
+        if self.tools is None:
+            return f"No tool registry configured; cannot call '{intent.tool_name}'."
+        try:
+            self.tools.get(intent.tool_name)
+        except KeyError:
+            return f"Tool '{intent.tool_name}' is not registered."
+        if self.config.tools is not None and intent.tool_name not in self.config.tools:
+            return f"Tool '{intent.tool_name}' is not in the agent's allowed tool set."
+        return None
+
+    def _tool_parameter_schema(self, tool_name: str) -> dict[str, Any]:
+        """Retrieve the JSON-Schema ``parameters`` block for a registered tool."""
+        try:
+            tool = self.tools.get(tool_name)
+            return getattr(tool, "parameters", {})
+        except (KeyError, AttributeError):
+            return {}
+
+    @staticmethod
+    def _artifact_generation_prompt(
+        user_request: str,
+        intent: ArtifactIntent,
+        tool_schema: dict[str, Any],
+    ) -> str:
+        """Build a prompt that steers the model toward calling the artifact tool."""
+        schema_hint = json.dumps(tool_schema, indent=2) if tool_schema else "{}"
+        return (
+            f"{user_request}\n\n"
+            f"--- Artifact Generation Instructions ---\n"
+            f"You MUST produce a structured JSON tool call for the tool '{intent.tool_name}' "
+            f"to create a {intent.artifact_type} artifact.\n"
+            f"The tool accepts the following JSON schema for its arguments:\n"
+            f"```json\n{schema_hint}\n```\n"
+            f"Call the tool with well-formed arguments derived from the user's request. "
+            f"Do NOT output the artifact content as plain text; use the tool call."
+        )
+
+    @staticmethod
+    def _find_tool_result(
+        state: AgentState,
+        tool_name: str,
+    ) -> dict[str, Any] | None:
+        """Extract the first successful tool result for *tool_name* from the agent state."""
+        for result in state.tool_results:
+            if isinstance(result, dict) and result.get("tool") == tool_name and result.get("success"):
+                return result
+        return None
+
+    async def _parse_and_execute_tool(
+        self,
+        model_response: ModelResponse,
+        intent: ArtifactIntent,
+        task_id: str,
+    ) -> dict[str, Any]:
+        """Parse JSON arguments from model output and execute the artifact tool."""
+        arguments = self._extract_tool_arguments(model_response, intent.tool_name)
+        if arguments is None:
+            return {
+                "tool": intent.tool_name,
+                "success": False,
+                "output": None,
+                "error": "Model did not produce valid tool-call arguments for the artifact tool.",
+                "artifacts": [],
+            }
+
+        try:
+            tool = self.tools.get(intent.tool_name)
+            result = await tool.execute(arguments, context={"task_id": task_id})
+        except Exception as exc:
+            return {
+                "tool": intent.tool_name,
+                "success": False,
+                "output": None,
+                "error": f"Tool execution failed: {exc}",
+                "artifacts": [],
+            }
+
+        return {
+            "tool": intent.tool_name,
+            "success": result.success,
+            "output": result.output,
+            "error": result.error,
+            "artifacts": result.artifacts,
+        }
+
+    @staticmethod
+    def _extract_tool_arguments(
+        model_response: ModelResponse,
+        tool_name: str,
+    ) -> dict[str, Any] | None:
+        """Best-effort extraction of tool-call arguments from model output.
+
+        Checks, in order:
+        1. Structured ``tool_calls`` on the response.
+        2. ``tool_calls`` key inside ``response.raw``.
+        3. JSON block in ``response.content``.
+        """
+        # 1. Structured tool_calls on ModelResponse.
+        for tc in model_response.tool_calls:
+            if tc.name == tool_name:
+                return tc.arguments
+
+        # 2. raw dict may carry tool_calls from the provider.
+        raw_calls = model_response.raw.get("tool_calls")
+        if isinstance(raw_calls, list):
+            for item in raw_calls:
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("tool")
+                    if name == tool_name:
+                        args = item.get("arguments") or item.get("args") or {}
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                continue
+                        if isinstance(args, dict):
+                            return args
+
+        # 3. Try parsing the content as JSON.
+        content = model_response.content.strip()
+        if not content:
+            return None
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(payload, dict):
+            # Direct argument object.
+            if "tool_calls" in payload and isinstance(payload["tool_calls"], list):
+                for item in payload["tool_calls"]:
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("tool")
+                        if name == tool_name:
+                            args = item.get("arguments") or item.get("args") or {}
+                            return args if isinstance(args, dict) else None
+            # Could be the arguments themselves.
+            return payload
+        return None
+
+    @staticmethod
+    def _build_result(
+        task_id: str,
+        intent: ArtifactIntent,
+        tool_result: dict[str, Any],
+    ) -> ArtifactGenerationResult:
+        """Convert a raw tool-result dict into the typed orchestration response."""
+        success = bool(tool_result.get("success"))
+        output = tool_result.get("output")
+        artifacts = tool_result.get("artifacts", [])
+        error = tool_result.get("error")
+
+        path: str | None = None
+        download_url: str | None = None
+        artifact_metadata: dict[str, Any] = {}
+
+        if success and isinstance(output, dict):
+            artifact_metadata = output
+            path = output.get("storage_uri") or (artifacts[0] if artifacts else None)
+            filename = output.get("filename")
+            if filename:
+                download_url = f"/api/v1/artifacts/{filename}/download"
+
+        status = "completed" if success else "failed"
+        errors: list[str] = []
+        if error:
+            errors.append(error)
+
+        return ArtifactGenerationResult(
+            task_id=task_id,
+            artifact_type=intent.artifact_type,
+            status=status,
+            path=path,
+            download_url=download_url,
+            artifact_metadata=artifact_metadata,
+            errors=errors,
         )

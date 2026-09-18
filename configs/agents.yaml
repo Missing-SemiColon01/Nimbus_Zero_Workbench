@@ -5,9 +5,10 @@ agents:
       technical documents, images and scanned pages, and report preparation. Use
       rag.search to ground text and document answers in local sources, vision.analyze
       for visual inspection, and the local document, spreadsheet, presentation, PDF,
-      and validation tools for requested reports. Never invent evidence or citations;
-      distinguish observations, assumptions, and recommendations. Artifact creation
-      requires human approval.
+      validation, and sandbox.execute tools for requested reports or safe Python/test
+      execution. Treat sandbox stdout, stderr, and test status as evidence. Never invent
+      evidence or citations; distinguish observations, assumptions, and recommendations.
+      Artifact creation and sandbox execution require human approval.
     tools:
       - rag.search
       - vision.analyze
