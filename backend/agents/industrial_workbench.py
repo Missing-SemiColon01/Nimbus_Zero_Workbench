@@ -14,6 +14,7 @@ from backend.agents.artifact_detection import ArtifactIntent, detect_artifact_in
 from backend.agents.runtime import AgentRuntime, RuntimeConfig
 from backend.agents.state import AgentState
 from backend.models.contracts import ModelResponse
+from backend.security.policy import PolicyDecision
 from backend.schemas.artifact_result import ArtifactGenerationResult
 from backend.tools.registry import ToolRegistry
 
@@ -187,6 +188,7 @@ class IndustrialWorkbenchAgent:
         capabilities: set[str],
         modality: str = "text",
         *,
+        task_id: str | None = None,
         images: list[str] | None = None,
         documents: list[str] | None = None,
         approved_tools: set[str] | None = None,
@@ -195,6 +197,7 @@ class IndustrialWorkbenchAgent:
             user_request,
             capabilities,
             modality,
+            task_id=task_id,
             tool_allowlist=set(self.config.tools) if self.config.tools is not None else None,
             approved_tools=approved_tools,
             images=images,
@@ -256,15 +259,12 @@ class IndustrialWorkbenchAgent:
         tool_schema = self._tool_parameter_schema(intent.tool_name)
         generation_prompt = self._artifact_generation_prompt(user_request, intent, tool_schema)
 
-        # Ensure the target tool is approved so the runtime can call it.
-        effective_approved = set(approved_tools or ())
-        effective_approved.add(intent.tool_name)
-
         try:
             state, model_response = await self.run(
                 generation_prompt,
                 {"reasoning"},
-                approved_tools=effective_approved,
+                task_id=task_id,
+                approved_tools=approved_tools,
             )
         except Exception as exc:
             return ArtifactGenerationResult(
@@ -274,25 +274,84 @@ class IndustrialWorkbenchAgent:
                 errors=[f"Model generation failed: {exc}"],
             )
 
-        if state.status == "failed":
-            return ArtifactGenerationResult(
-                task_id=task_id,
-                artifact_type=intent.artifact_type,
-                status="failed",
-                errors=state.errors or ["Model generation failed."],
+        if state.status in {"failed", "awaiting_approval"}:
+            return self._build_result_from_state(
+                state,
+                intent,
+                status=state.status,
+                errors=state.errors or (["Model generation failed."] if state.status == "failed" else []),
             )
 
         # 4. Check if the runtime already executed the artifact tool.
         tool_result = self._find_tool_result(state, intent.tool_name)
 
         if tool_result is None:
-            # The model returned content but didn't call the tool — parse and call manually.
-            tool_result = await self._parse_and_execute_tool(
-                model_response, intent, task_id,
+            # If the runtime did attempt this call and it failed (for example,
+            # schema validation or a generator error), retain that evidence
+            # instead of issuing the same side-effecting call a second time.
+            attempted_result = next(
+                (
+                    result
+                    for result in state.tool_results
+                    if isinstance(result, dict) and result.get("tool") == intent.tool_name
+                ),
+                None,
             )
+            if attempted_result is not None:
+                return self._build_result_from_state(
+                    state,
+                    intent,
+                    tool_result=attempted_result,
+                )
+
+            # The model returned content but didn't call the tool — parse and call manually.
+            arguments = self._extract_tool_arguments(model_response, intent.tool_name)
+            if arguments is None:
+                tool_result = {
+                    "tool": intent.tool_name,
+                    "success": False,
+                    "output": None,
+                    "error": "Model did not produce valid tool-call arguments for the artifact tool.",
+                    "artifacts": [],
+                }
+            elif (
+                self.runtime.policy.evaluate(intent.tool_name) is PolicyDecision.REQUIRE_APPROVAL
+                and intent.tool_name not in set(approved_tools or ())
+            ):
+                approval_error = f"Tool '{intent.tool_name}' requires human approval."
+                tool_result = {
+                    "tool": intent.tool_name,
+                    "success": False,
+                    "output": {"approval_required": True, "tool": intent.tool_name},
+                    "error": approval_error,
+                    "artifacts": [],
+                }
+                return self._build_result_from_state(
+                    state,
+                    intent,
+                    status="awaiting_approval",
+                    tool_results=[*state.tool_results, tool_result],
+                    approval_required=True,
+                    approval_requests=[
+                        *state.approval_requests,
+                        {
+                            "tool": intent.tool_name,
+                            "arguments": arguments,
+                            "tool_call_id": None,
+                            "reason": approval_error,
+                        },
+                    ],
+                )
+            else:
+                tool_result = await self._execute_artifact_tool(arguments, intent, task_id)
 
         # 5. Build the typed response.
-        return self._build_result(task_id, intent, tool_result)
+        return self._build_result_from_state(
+            state,
+            intent,
+            tool_result=tool_result,
+            tool_results=[*state.tool_results, *([] if self._find_tool_result(state, intent.tool_name) else [tool_result])],
+        )
 
     # -- Private helpers -------------------------------------------------------
 
@@ -346,23 +405,13 @@ class IndustrialWorkbenchAgent:
                 return result
         return None
 
-    async def _parse_and_execute_tool(
+    async def _execute_artifact_tool(
         self,
-        model_response: ModelResponse,
+        arguments: dict[str, Any],
         intent: ArtifactIntent,
         task_id: str,
     ) -> dict[str, Any]:
-        """Parse JSON arguments from model output and execute the artifact tool."""
-        arguments = self._extract_tool_arguments(model_response, intent.tool_name)
-        if arguments is None:
-            return {
-                "tool": intent.tool_name,
-                "success": False,
-                "output": None,
-                "error": "Model did not produce valid tool-call arguments for the artifact tool.",
-                "artifacts": [],
-            }
-
+        """Execute a model-produced artifact call with the workflow task context."""
         try:
             tool = self.tools.get(intent.tool_name)
             result = await tool.execute(arguments, context={"task_id": task_id})
@@ -437,16 +486,26 @@ class IndustrialWorkbenchAgent:
             return payload
         return None
 
-    @staticmethod
-    def _build_result(
-        task_id: str,
+    def _build_result_from_state(
+        self,
+        state: AgentState,
         intent: ArtifactIntent,
-        tool_result: dict[str, Any],
+        tool_result: dict[str, Any] | None = None,
+        *,
+        status: str | None = None,
+        errors: list[str] | None = None,
+        tool_results: list[dict[str, Any]] | None = None,
+        approval_required: bool | None = None,
+        approval_requests: list[dict[str, Any]] | None = None,
     ) -> ArtifactGenerationResult:
         """Convert a raw tool-result dict into the typed orchestration response."""
+        tool_result = tool_result or {}
         success = bool(tool_result.get("success"))
         output = tool_result.get("output")
-        artifacts = tool_result.get("artifacts", [])
+        artifacts = list(state.artifacts)
+        for artifact in tool_result.get("artifacts", []):
+            if artifact not in artifacts:
+                artifacts.append(artifact)
         error = tool_result.get("error")
 
         path: str | None = None
@@ -460,17 +519,31 @@ class IndustrialWorkbenchAgent:
             if filename:
                 download_url = f"/api/v1/artifacts/{filename}/download"
 
-        status = "completed" if success else "failed"
-        errors: list[str] = []
-        if error:
-            errors.append(error)
+        # A completed model turn is not a completed artifact task unless its
+        # target tool actually succeeded.  Approval-pending runs return above
+        # with an explicit status, so failed extraction/execution is failed.
+        resolved_status = status or ("completed" if success else "failed")
+        resolved_errors = list(errors if errors is not None else state.errors)
+        if error and error not in resolved_errors:
+            resolved_errors.append(error)
 
         return ArtifactGenerationResult(
-            task_id=task_id,
+            task_id=state.task_id,
             artifact_type=intent.artifact_type,
-            status=status,
+            status=resolved_status,
             path=path,
             download_url=download_url,
             artifact_metadata=artifact_metadata,
-            errors=errors,
+            errors=resolved_errors,
+            selected_model=state.selected_model,
+            provider=state.provider,
+            fallback_used=state.fallback_used,
+            attempted_models=state.attempted_models,
+            plan=state.plan,
+            response=state.final_response or "",
+            execution_duration=state.execution_duration,
+            artifacts=artifacts,
+            tool_results=tool_results if tool_results is not None else state.tool_results,
+            approval_required=state.approval_required if approval_required is None else approval_required,
+            approval_requests=state.approval_requests if approval_requests is None else approval_requests,
         )

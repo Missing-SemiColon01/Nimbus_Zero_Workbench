@@ -291,7 +291,10 @@ class TestGenerateArtifactHappyPath:
         agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
 
         result = asyncio.run(
-            agent.generate_artifact("Generate a report on the pump inspection")
+            agent.generate_artifact(
+                "Generate a report on the pump inspection",
+                approved_tools={"document.create"},
+            )
         )
 
         assert isinstance(result, ArtifactGenerationResult)
@@ -314,7 +317,10 @@ class TestGenerateArtifactHappyPath:
         agent = _build_agent(tmp_path, provider, extra_tools={"presentation.create": pres_tool})
 
         result = asyncio.run(
-            agent.generate_artifact("Create a presentation about Q3 safety")
+            agent.generate_artifact(
+                "Create a presentation about Q3 safety",
+                approved_tools={"presentation.create"},
+            )
         )
 
         assert result.artifact_type == "presentation"
@@ -332,7 +338,10 @@ class TestGenerateArtifactHappyPath:
         agent = _build_agent(tmp_path, provider, extra_tools={"spreadsheet.create": xl_tool})
 
         result = asyncio.run(
-            agent.generate_artifact("Generate a spreadsheet with sensor readings")
+            agent.generate_artifact(
+                "Generate a spreadsheet with sensor readings",
+                approved_tools={"spreadsheet.create"},
+            )
         )
 
         assert result.artifact_type == "spreadsheet"
@@ -351,7 +360,10 @@ class TestGenerateArtifactHappyPath:
         agent = _build_agent(tmp_path, provider, extra_tools={"pdf.create": pdf_tool})
 
         result = asyncio.run(
-            agent.generate_artifact("Create a pdf report on valve inspection")
+            agent.generate_artifact(
+                "Create a pdf report on valve inspection",
+                approved_tools={"pdf.create"},
+            )
         )
 
         assert result.artifact_type == "pdf"
@@ -416,7 +428,11 @@ class TestGenerateArtifactFailures:
         agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
 
         result = asyncio.run(
-            agent.generate_artifact("Generate a report on the test", task_type="report")
+            agent.generate_artifact(
+                "Generate a report on the test",
+                task_type="report",
+                approved_tools={"document.create"},
+            )
         )
 
         assert result.status == "failed"
@@ -519,7 +535,11 @@ class TestTaskTypeRouting:
         agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
 
         result = asyncio.run(
-            agent.generate_artifact("summarize findings", task_type="report")
+            agent.generate_artifact(
+                "summarize findings",
+                task_type="report",
+                approved_tools={"document.create"},
+            )
         )
 
         assert result.artifact_type == "document"
@@ -537,6 +557,7 @@ class TestTaskTypeRouting:
             agent.generate_artifact(
                 "create a presentation deck about maintenance",
                 task_type="artifact",
+                approved_tools={"presentation.create"},
             )
         )
 

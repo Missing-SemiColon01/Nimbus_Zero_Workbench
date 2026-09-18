@@ -76,6 +76,11 @@ class OllamaProvider(ModelProvider):
             payload["images"] = request.images
         if request.documents:
             payload["documents"] = request.documents
+        # Ollama accepts provider-native function/tool schemas on generation
+        # requests.  Forward the runtime's schemas unchanged so local models
+        # can issue structured calls instead of relying on JSON-in-text.
+        if request.tools:
+            payload["tools"] = request.tools
         async with httpx.AsyncClient(timeout=120) as client:
             try:
                 response = await client.post(f"{self.base_url}/api/generate", json=payload)
