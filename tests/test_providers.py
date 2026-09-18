@@ -144,6 +144,35 @@ def test_ollama_provider_forwards_document_attachments(monkeypatch):
     assert captured["body"]["documents"] == ["base64-pdf-data"]
 
 
+def test_ollama_provider_forwards_tool_schemas(monkeypatch):
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"response": "tool ready"})
+
+    transport = httpx.MockTransport(handler)
+
+    class TestClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            super().__init__(transport=transport, **kwargs)
+
+    monkeypatch.setattr("backend.models.providers.httpx.AsyncClient", TestClient)
+    tool_schema = {
+        "name": "pdf.create",
+        "description": "Create a PDF",
+        "parameters": {"type": "object", "properties": {"subject": {"type": "string"}}},
+    }
+
+    asyncio.run(
+        OllamaProvider("http://ollama:11434").generate(
+            MODEL, ModelRequest(prompt="create a PDF", tools=[tool_schema])
+        )
+    )
+
+    assert captured["body"]["tools"] == [tool_schema]
+
+
 def test_ollama_provider_raises_provider_error_on_http_failure(monkeypatch):
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": "Model failed to load"})

@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, s
 from fastapi.responses import FileResponse
 
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
+from backend.agents.artifact_detection import detect_artifact_intent
 from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import NoCompatibleModelError
 from backend.sandbox.coding_workflow import CodingWorkflow
@@ -149,6 +150,35 @@ async def create_task(payload: TaskCreate, request: Request):
     ]
 
     documents = [*payload.documents, *document_paths]
+    # Artifact detection is centralized with the agent's existing artifact
+    # orchestration.  It honors task_type (report/artifact) and all supported
+    # artifact formats rather than routing only PDF-shaped text specially.
+    artifact_intent = detect_artifact_intent(payload.request, payload.task_type)
+    generate_artifact = getattr(request.app.state.agent, "generate_artifact", None)
+    if artifact_intent is not None and callable(generate_artifact):
+        result = await generate_artifact(
+            payload.request,
+            task_type=payload.task_type,
+            approved_tools=payload.approved_tools,
+        )
+        return TaskResponse(
+            task_id=result.task_id,
+            status=result.status,
+            selected_model=result.selected_model,
+            provider=result.provider,
+            fallback_used=result.fallback_used,
+            attempted_models=result.attempted_models,
+            plan=result.plan,
+            response=result.response,
+            execution_duration=result.execution_duration,
+            artifacts=result.artifacts,
+            generated_artifacts=_task_artifact_infos(request.app.state.settings, result.artifacts),
+            tool_results=result.tool_results,
+            errors=result.errors,
+            approval_required=result.approval_required,
+            approval_requests=result.approval_requests,
+        )
+
     required_capabilities = payload.required_capabilities
     if documents and payload.task_type is None and not payload.capabilities:
         required_capabilities = {"document_understanding"}
