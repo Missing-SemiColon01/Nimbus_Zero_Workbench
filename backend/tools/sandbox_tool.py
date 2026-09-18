@@ -18,14 +18,20 @@ class SandboxTool(Tool):
     """Execute Python code in an isolated sandbox and capture results."""
 
     name = "sandbox.execute"
-    description = "Execute Python code in a network-disabled sandbox with optional pytest tests."
+    description = "Execute Python code in a network-disabled sandbox with optional pytest tests. Print results to stdout or create files."
     parameters = {
         "type": "object",
         "properties": {
-            "code": {"type": "string"},
-            "test_code": {"type": "string"},
-            "language": {"type": "string"},
-            "timeout_seconds": {"type": "integer"},
+            "code": {
+                "type": "string",
+                "description": "Python source code to execute. Can define functions, variables, or print outputs.",
+            },
+            "test_code": {
+                "type": "string",
+                "description": "Optional pytest test code. When provided, functions/variables from 'code' are automatically available in tests.",
+            },
+            "language": {"type": "string", "default": "python"},
+            "timeout_seconds": {"type": "integer", "default": 30},
         },
         "required": ["code"],
     }

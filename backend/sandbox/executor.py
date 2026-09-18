@@ -152,18 +152,24 @@ class DockerSandboxExecutor:
                 exit_code = int(result.get("StatusCode", 1))
                 timed_out = False
             except Exception:
+                timed_out = True
+                exit_code = -1
+                try:
+                    stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+                    stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
                 try:
                     container.kill()
                 except Exception:
                     pass
-                exit_code = -1
-                timed_out = True
 
-            try:
-                stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
-                stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
-            except Exception as log_exc:
-                logger.warning("Failed to retrieve container logs: %s", log_exc)
+            if not timed_out:
+                try:
+                    stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+                    stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
+                except Exception as log_exc:
+                    logger.warning("Failed to retrieve container logs: %s", log_exc)
         finally:
             # Automatically remove temporary container
             try:
@@ -234,12 +240,18 @@ class DockerSandboxExecutor:
     @staticmethod
     def _write_files(workspace: Path, request: SandboxRequest) -> None:
         safe_entry = Path(request.entry_point).name or "solution.py"
+        entry_stem = Path(safe_entry).stem
         (workspace / safe_entry).write_text(request.code, encoding="utf-8")
         if request.test_code:
             test_dir = workspace / "tests"
             test_dir.mkdir(exist_ok=True)
             (test_dir / "__init__.py").write_text("", encoding="utf-8")
-            (test_dir / "test_generated.py").write_text(request.test_code, encoding="utf-8")
+            # Automatically expose symbols from the entry file (solution.py) into the test script
+            # so models asserting variables or functions directly will not raise NameError
+            test_content = request.test_code
+            if f"import {entry_stem}" not in test_content and f"from {entry_stem}" not in test_content:
+                test_content = f"import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).resolve().parent.parent))\ntry:\n    from {entry_stem} import *\nexcept Exception:\n    pass\n\n{test_content}"
+            (test_dir / "test_generated.py").write_text(test_content, encoding="utf-8")
 
     @staticmethod
     def _build_command(request: SandboxRequest) -> list[str]:
@@ -249,6 +261,8 @@ class DockerSandboxExecutor:
                 "-m",
                 "pytest",
                 "tests/test_generated.py",
+                "-o",
+                "pythonpath=.",
                 "-v",
                 "--tb=short",
                 "--no-header",
