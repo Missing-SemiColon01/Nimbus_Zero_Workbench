@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse
+from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse, ToolCall
 
 
 class ModelProvider(ABC):
@@ -71,19 +71,38 @@ class OllamaProvider(ModelProvider):
         self.base_url = base_url.rstrip("/")
 
     async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
-        payload: dict[str, Any] = {"model": model.model, "prompt": request.prompt, "stream": False}
+        messages = []
+        if request.prompt:
+            messages.append({"role": "user", "content": request.prompt})
+
+        payload: dict[str, Any] = {
+            "model": model.model,
+            "messages": messages,
+            "stream": False,
+        }
         if request.images:
-            payload["images"] = request.images
-        if request.documents:
-            payload["documents"] = request.documents
-        # Ollama accepts provider-native function/tool schemas on generation
-        # requests.  Forward the runtime's schemas unchanged so local models
-        # can issue structured calls instead of relying on JSON-in-text.
+            # Attach images to the last user message if present
+            if messages:
+                messages[-1]["images"] = request.images
+            else:
+                messages.append({"role": "user", "content": "", "images": request.images})
+
         if request.tools:
-            payload["tools"] = request.tools
+            formatted_tools = []
+            for tool_schema in request.tools:
+                formatted_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool_schema.get("name"),
+                        "description": tool_schema.get("description", ""),
+                        "parameters": tool_schema.get("parameters", {}),
+                    },
+                })
+            payload["tools"] = formatted_tools
+
         async with httpx.AsyncClient(timeout=120) as client:
             try:
-                response = await client.post(f"{self.base_url}/api/generate", json=payload)
+                response = await client.post(f"{self.base_url}/api/chat", json=payload)
                 response.raise_for_status()
                 data = response.json()
             except httpx.HTTPStatusError as error:
@@ -96,4 +115,25 @@ class OllamaProvider(ModelProvider):
                 raise ProviderError(f"Ollama generation failed for model '{model.id}'") from error
             except ValueError as error:
                 raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'") from error
-        return ModelResponse(content=data.get("response", ""), model_id=model.id, raw=data)
+
+        msg = data.get("message", {})
+        content = msg.get("content", "")
+        raw_tool_calls = msg.get("tool_calls", [])
+        tool_calls = []
+
+        if isinstance(raw_tool_calls, list):
+            for tc in raw_tool_calls:
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {})
+                    name = fn.get("name") or tc.get("name")
+                    args = fn.get("arguments") or tc.get("arguments") or {}
+                    call_id = tc.get("id")
+                    if isinstance(name, str) and name.strip():
+                        tool_calls.append(ToolCall(name=name.strip(), arguments=args if isinstance(args, dict) else {}, id=call_id))
+
+        return ModelResponse(
+            content=content,
+            model_id=model.id,
+            raw=data,
+            tool_calls=tool_calls,
+        )
