@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol,Any
 
 from backend.sandbox.contracts import SandboxRequest, SandboxResult
 
