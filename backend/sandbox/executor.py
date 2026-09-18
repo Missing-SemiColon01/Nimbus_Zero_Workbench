@@ -24,6 +24,8 @@ class SandboxExecutor(Protocol):
 class DockerSandboxExecutor:
     """Run Python code inside a network-disabled Docker container."""
 
+    SUPPORTED_ARTIFACT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+
     def __init__(
         self,
         image: str = "workbench-sandbox:latest",
@@ -64,63 +66,115 @@ class DockerSandboxExecutor:
             )
 
         timeout = request.timeout_seconds or self.timeout_seconds
+        target_artifacts_dir = Path(request.artifacts_dir) if request.artifacts_dir else None
 
-        with tempfile.TemporaryDirectory(prefix="workbench_sandbox_") as tmpdir:
-            workspace = Path(tmpdir)
-            self._write_files(workspace, request)
-            command = self._build_command(request)
+        # Create or use isolated workspace
+        is_custom_workspace = bool(request.workspace_dir)
+        if is_custom_workspace:
+            workspace = Path(request.workspace_dir).resolve()
+            workspace.mkdir(parents=True, exist_ok=True)
+            return self._execute_in_workspace(client, workspace, request, timeout, target_artifacts_dir)
+        else:
+            prefix = f"workbench_sandbox_{request.task_id}_" if request.task_id else "workbench_sandbox_"
+            with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+                workspace = Path(tmpdir)
+                return self._execute_in_workspace(client, workspace, request, timeout, target_artifacts_dir)
 
-            container = None
+    def _execute_in_workspace(
+        self,
+        client: Any,
+        workspace: Path,
+        request: SandboxRequest,
+        timeout: int,
+        target_artifacts_dir: Path | None,
+    ) -> SandboxResult:
+        self._write_files(workspace, request)
+        command = self._build_command(request)
+
+        # Snapshot files in workspace before run
+        existing_files = {p.name for p in workspace.rglob("*") if p.is_file()}
+
+        container = None
+        exit_code = -1
+        timed_out = False
+        stdout = ""
+        stderr = ""
+
+        # Attempt to run with non-root user 'runner' or fallback to default
+        user_options = ["runner", "1000:1000", None]
+        run_error = None
+
+        for user_candidate in user_options:
+            run_kwargs: dict[str, Any] = {
+                "command": command,
+                "volumes": {
+                    str(workspace): {
+                        "bind": "/workspace",
+                        "mode": "rw",
+                    }
+                },
+                "working_dir": "/workspace",
+                "network_disabled": True,
+                "mem_limit": self.mem_limit,
+                "cpu_quota": self.cpu_quota,
+                "read_only": False,
+                "remove": False,
+                "detach": True,
+            }
+            if user_candidate:
+                run_kwargs["user"] = user_candidate
+
             try:
-                try:
-                    container = client.containers.run(
-                        self.image,
-                        command=command,
-                        volumes={
-                            str(workspace): {
-                                "bind": "/workspace",
-                                "mode": "rw",
-                            }
-                        },
-                        working_dir="/workspace",
-                        network_disabled=True,
-                        mem_limit=self.mem_limit,
-                        cpu_quota=self.cpu_quota,
-                        read_only=False,
-                        remove=False,
-                        detach=True,
-                        user="runner",
-                    )
-                except Exception as exc:
-                    logger.error("Failed to run Docker container: %s", exc)
-                    return SandboxResult(
-                        exit_code=-1,
-                        stdout="",
-                        stderr="",
-                        test_passed=False,
-                        error=f"Docker container execution failed: {exc}",
-                    )
+                container = client.containers.run(self.image, **run_kwargs)
+                run_error = None
+                break
+            except Exception as exc:
+                run_error = exc
+                err_str = str(exc).lower()
+                # If failure is related to user not existing, try next user option
+                if "user" in err_str or "unable to find user" in err_str or "no such user" in err_str:
+                    continue
+                break
 
+        if container is None:
+            logger.error("Failed to run Docker container: %s", run_error)
+            return SandboxResult(
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                test_passed=False,
+                error=f"Docker container execution failed: {run_error}",
+            )
+
+        try:
+            try:
+                result = container.wait(timeout=timeout)
+                exit_code = int(result.get("StatusCode", 1))
+                timed_out = False
+            except Exception:
                 try:
-                    result = container.wait(timeout=timeout)
-                    exit_code = int(result.get("StatusCode", 1))
-                    timed_out = False
+                    container.kill()
                 except Exception:
-                    try:
-                        container.kill()
-                    except Exception:
-                        pass
-                    exit_code = -1
-                    timed_out = True
+                    pass
+                exit_code = -1
+                timed_out = True
 
+            try:
                 stdout = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
                 stderr = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
-            finally:
-                if container is not None:
-                    try:
-                        container.remove(force=True)
-                    except Exception:
-                        pass
+            except Exception as log_exc:
+                logger.warning("Failed to retrieve container logs: %s", log_exc)
+        finally:
+            # Automatically remove temporary container
+            try:
+                container.remove(force=True)
+            except Exception as rem_exc:
+                logger.debug("Failed to remove container: %s", rem_exc)
+
+        # Collect any generated artifacts
+        artifacts, generated_files = self._harvest_artifacts(
+            workspace, existing_files, target_artifacts_dir, request.task_id
+        )
 
         return SandboxResult(
             exit_code=exit_code,
@@ -128,7 +182,54 @@ class DockerSandboxExecutor:
             stderr=stderr,
             test_passed=bool(request.test_code) and exit_code == 0,
             timed_out=timed_out,
+            artifacts=artifacts,
+            generated_files=generated_files,
         )
+
+    @classmethod
+    def _harvest_artifacts(
+        cls,
+        workspace: Path,
+        existing_files: set[str],
+        target_artifacts_dir: Path | None,
+        task_id: str | None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        import shutil
+        import mimetypes
+
+        artifacts: list[str] = []
+        generated_files: list[dict[str, Any]] = []
+
+        for p in workspace.rglob("*"):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in cls.SUPPORTED_ARTIFACT_EXTENSIONS:
+                continue
+            if p.name in existing_files:
+                continue
+
+            dest_path = p
+            if target_artifacts_dir is not None:
+                target_artifacts_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = target_artifacts_dir / p.name
+                shutil.copy2(p, dest_path)
+
+            storage_uri = str(dest_path.resolve())
+            artifacts.append(storage_uri)
+
+            mime_type, _ = mimetypes.guess_type(dest_path.name)
+            stat = dest_path.stat()
+            file_meta = {
+                "filename": dest_path.name,
+                "file_type": dest_path.suffix.lstrip(".").lower(),
+                "size_bytes": stat.st_size,
+                "storage_uri": storage_uri,
+                "mime_type": mime_type or "application/octet-stream",
+                "task_id": task_id or "unknown",
+            }
+            generated_files.append(file_meta)
+
+        return artifacts, generated_files
 
     @staticmethod
     def _write_files(workspace: Path, request: SandboxRequest) -> None:
@@ -169,52 +270,77 @@ class MockSandboxExecutor:
                 error=f"Unsupported sandbox language: {request.language}",
             )
 
-        with tempfile.TemporaryDirectory(prefix="workbench_mock_sandbox_") as tmpdir:
-            workspace = Path(tmpdir)
-            DockerSandboxExecutor._write_files(workspace, request)
-            if request.test_code:
-                command = [
-                    sys.executable,
-                    "-m",
-                    "pytest",
-                    str(workspace / "tests" / "test_generated.py"),
-                    "-v",
-                    "--tb=short",
-                    "--no-header",
-                ]
-            else:
-                command = [sys.executable, str(workspace / (Path(request.entry_point).name or "solution.py"))]
+        target_artifacts_dir = Path(request.artifacts_dir) if request.artifacts_dir else None
+        is_custom_workspace = bool(request.workspace_dir)
 
-            try:
-                proc = subprocess.run(
-                    command,
-                    cwd=str(workspace),
-                    capture_output=True,
-                    text=True,
-                    timeout=request.timeout_seconds or 30,
-                )
-            except subprocess.TimeoutExpired:
-                return SandboxResult(
-                    exit_code=-1,
-                    stdout="",
-                    stderr="",
-                    test_passed=False,
-                    timed_out=True,
-                )
-            except Exception as exc:
-                return SandboxResult(
-                    exit_code=-1,
-                    stdout="",
-                    stderr="",
-                    test_passed=False,
-                    error=str(exc),
-                )
+        if is_custom_workspace:
+            workspace = Path(request.workspace_dir).resolve()
+            workspace.mkdir(parents=True, exist_ok=True)
+            return self._execute_in_workspace(workspace, request, target_artifacts_dir)
+        else:
+            prefix = f"workbench_mock_sandbox_{request.task_id}_" if request.task_id else "workbench_mock_sandbox_"
+            with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+                workspace = Path(tmpdir)
+                return self._execute_in_workspace(workspace, request, target_artifacts_dir)
+
+    def _execute_in_workspace(
+        self,
+        workspace: Path,
+        request: SandboxRequest,
+        target_artifacts_dir: Path | None,
+    ) -> SandboxResult:
+        DockerSandboxExecutor._write_files(workspace, request)
+        existing_files = {p.name for p in workspace.rglob("*") if p.is_file()}
+
+        if request.test_code:
+            command = [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(workspace / "tests" / "test_generated.py"),
+                "-v",
+                "--tb=short",
+                "--no-header",
+            ]
+        else:
+            command = [sys.executable, str(workspace / (Path(request.entry_point).name or "solution.py"))]
+
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=str(workspace),
+                capture_output=True,
+                text=True,
+                timeout=request.timeout_seconds or 30,
+            )
+        except subprocess.TimeoutExpired:
+            return SandboxResult(
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                test_passed=False,
+                timed_out=True,
+            )
+        except Exception as exc:
+            return SandboxResult(
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                test_passed=False,
+                error=str(exc),
+            )
+
+        artifacts, generated_files = DockerSandboxExecutor._harvest_artifacts(
+            workspace, existing_files, target_artifacts_dir, request.task_id
+        )
 
         return SandboxResult(
             exit_code=proc.returncode,
             stdout=proc.stdout,
             stderr=proc.stderr,
             test_passed=bool(request.test_code) and proc.returncode == 0,
+            artifacts=artifacts,
+            generated_files=generated_files,
         )
 
 

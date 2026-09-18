@@ -27,3 +27,6 @@ uv.lock
 data/knowledge/qdrant/
 data/knowledge/chroma/
 data/knowledge/model_cache/
+
+
+.env.local
