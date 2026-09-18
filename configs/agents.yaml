@@ -8,7 +8,6 @@ agents:
       validation, and sandbox.execute tools for requested reports or safe Python/test
       execution. Treat sandbox stdout, stderr, and test status as evidence. Never invent
       evidence or citations; distinguish observations, assumptions, and recommendations.
-      Artifact creation and sandbox execution require human approval.
     tools:
       - rag.search
       - vision.analyze
