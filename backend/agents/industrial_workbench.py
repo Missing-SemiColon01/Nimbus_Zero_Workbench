@@ -456,18 +456,20 @@ class IndustrialWorkbenchAgent:
                 skill_content = (
                     "Use `from docx_helpers import DocxBuilder`.\n"
                     "Initialize: `doc = DocxBuilder(theme='modern')`\n"
-                    "Add content: `doc.add_title(...)`, `doc.add_heading(...)`, `doc.add_paragraph(...)`, `doc.add_bullet(...)`.\n"
+                    "Design layout based on document type (report, proposal, resume, memo, invoice, guide, manual, letter, etc.).\n"
+                    "Use primitives: `doc.heading(...)`, `doc.text(...)`, `doc.bullet(...)`, `doc.table(...)`, `doc.card(...)`, `doc.callout(...)`, `doc.divider()`, `doc.page_break()`.\n"
                     "Finish with `doc.save('document.docx')`."
                 )
             elif intent.artifact_type == "pdf":
                 skill_content = (
                     "Use `from pdf_helpers import PdfBuilder`.\n"
                     "Initialize: `pdf = PdfBuilder(theme='modern')`\n"
-                    "Add content: `pdf.add_title(...)`, `pdf.add_heading(...)`, `pdf.add_paragraph(...)`.\n"
+                    "Design layout based on document type (report, proposal, resume, memo, invoice, guide, manual, letter, etc.).\n"
+                    "Use primitives: `pdf.banner(...)`, `pdf.heading(...)`, `pdf.text(...)`, `pdf.columns(...)`, `pdf.card(...)`, `pdf.callout(...)`, `pdf.kpis(...)`, `pdf.table(...)`, `pdf.divider()`, `pdf.page_break()`.\n"
                     "Finish with `pdf.save('report.pdf')`."
                 )
             else:
-                skill_content = f"Write a Python script to generate the {intent.artifact_type} deliverable."
+                skill_content = f"Write a Python script using helper primitives to generate the {intent.artifact_type} deliverable."
 
         return (
             f"User Request:\n{user_request}\n\n"

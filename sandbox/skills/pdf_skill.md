@@ -1,90 +1,110 @@
-# Skill: Dynamic PDF Document Design with `pdf_helpers`
+# Skill: General-Purpose Document Design with `pdf_helpers`
 
-The helper library provides rendering primitives; **YOU are responsible for the design.**
-Do NOT force every document into a single linear title-and-paragraph template. Use multi-column layouts, KPI callouts, formatted data tables, and structured cards to craft publication-grade reports.
+The `pdf_helpers` library is a document-generation and design SDK.
+**The LLM decides the document structure, layout, typography, colors, spacing, hierarchy, and components based on the specific task.**
 
-## Page Count Freedom
-- **There is NO fixed number of pages.**
-- If the user requests a 1-page executive memo or briefing note, make it **1 concise page**.
-- If the user requests an in-depth audit report or multi-section deliverable, structure it across multiple pages with `pdf.page_break()`.
-- Content naturally flows across pages while tables, columns, and cards format cleanly.
+Do NOT follow a rigid template or force every document into a fixed title → headings → paragraphs sequence. Choose an appropriate visual composition and document structure for the requested artifact.
 
-## Themes & Visual Palettes
-- `modern`: Deep slate (`#0F172A`), blue accents (`#2563EB`), neutral light gray surfaces (`#F8FAFC`).
-- `teal`: Industrial teal (`#064E5A`), vibrant mint accents (`#00A6A6`), clean engineering feel.
-- `midnight`: Deep navy (`#1E2761`), royal blue (`#3B6FE8`), technical and authoritative.
-- `forest`: Deep forest green (`#1E4620`), olive accents (`#97BC62`), safety and environmental reviews.
-- `corporate`: Classic sovereign navy (`#102A43`), steel blue (`#1F6FEB`), formal audits.
+## Supported Document Types
+Adapt your design for any user-requested document, including:
+- **Reports & Briefs**: Executive summaries, metric callouts, multi-column key takeaways, and structured findings.
+- **Proposals & Business Documents**: Formal headers, scope tables, deliverables matrices, and action steps.
+- **Research Papers & Technical Documentation**: Abstract callouts, multi-level numbering, data tables, and appendix sections.
+- **Resumes & Bios**: Compact header banners, two-column profile layouts, skills chips, and timeline entries.
+- **Guides, Manuals & Educational Material**: Highlight boxes, step-by-step instructions, and warning/tip callouts.
+- **Meeting Notes & Agendas**: Attendee tables, discussion summaries, and next-step action checklists.
+- **Invoices & Statements**: Itemized billing tables, total summaries, and payment terms.
+- **Formal Letters & Memos**: Date/recipient blocks, concise body paragraphs, and sign-off sections.
 
-## Core Primitives Reference
+## Document Length Freedom
+- **Zero fixed page count**: Match the user's explicit request or the topic's natural depth.
+- A memo or invoice can be **1 concise page**.
+- A technical specification, research paper, or proposal can span multiple pages. Use `pdf.page_break()` when starting major sections or standalone pages.
+
+## Design Primitives Reference
 
 ```python
 from pdf_helpers import PdfBuilder
 
-# 1. Document Initialization
-pdf = PdfBuilder(theme="modern", page_size="letter", orientation="portrait")
+# 1. Page Configuration & Theme Setup
+# Themes: "modern", "corporate", "teal", "midnight", "forest", "minimal"
+pdf = PdfBuilder(
+    theme="modern",
+    page_size="letter",          # "letter" or "a4"
+    orientation="portrait",      # "portrait" or "landscape"
+    margins=(54, 54, 54, 54)     # left, right, top, bottom in points (72 pt = 1 inch)
+)
 
-# 2. Executive Header Banner
-pdf.banner("Safety & Compliance Incident Briefing", subtitle="Plant Alpha Facility Audit - Q3 2026")
+# 2. Header & Banner Primitives
+pdf.banner("Project Horizon: Commercial Proposal", subtitle="Prepared for Acme Corp • Q4 Scope of Work", padding=14)
 
-# 3. KPI Metric Row
-pdf.kpis([
-    {"value": "99.98%", "label": "Telemetry Uptime", "delta": "+0.4%"},
-    {"value": "0", "label": "Safety Violations", "delta": "Target Met"},
-    {"value": "-34%", "label": "Near-Miss Reports", "delta": "Year-over-Year"}
-], cols=3)
+# 3. Typography Primitives
+pdf.heading("1. Executive Overview", level=1, size=18, space_before=12, space_after=6)
+pdf.text("This proposal outlines our strategic approach to modernizing your digital platform.")
 
-# 4. Multi-Column Layout (Side-by-side)
+# 4. Multi-Column & Side-by-Side Composition
+# Supports 2-column, 3-column, or asymmetric widths (e.g. 1/3 sidebar + 2/3 main body)
 pdf.columns([
     [
-        pdf.create_heading("Executive Summary", level=2),
-        pdf.create_text("The automated production cells completed all scheduled cycles with zero critical alerts."),
-        pdf.create_callout("All safety thresholds complied with ISO-45001 standards during the observation window.", label="Compliance Verified")
+        pdf.create_heading("Project Goals", level=2, size=13),
+        pdf.create_text("• Accelerate time-to-market by 40%.\n• Eliminate legacy platform maintenance debt."),
+        pdf.create_callout("Guaranteed delivery within 12 business weeks.", label="Key Commitment")
     ],
     [
-        pdf.create_heading("Inspection Results", level=2),
+        pdf.create_heading("Resource Allocation", level=2, size=13),
         pdf.create_table([
-            ["Component", "Score", "Status"],
-            ["Conveyor A", "99.4%", "Pass"],
-            ["Hydraulics", "98.1%", "Pass"],
-            ["Emergency Stop", "100.0%", "Pass"]
-        ], col_widths=[95, 75, 75])
+            ["Role", "Allocation", "Location"],
+            ["Lead Architect", "Full-time", "On-site"],
+            ["Senior Engineers (3)", "Full-time", "Hybrid"],
+            ["QA / Release Lead", "Half-time", "Remote"]
+        ], col_widths=[105, 75, 65])
     ]
-], widths=[250, 250], spacing=20)
+], widths=[255, 255], spacing=16)
 
-# 5. Full-Width Data Table
-pdf.heading("Detailed Incident Breakdown", level=2)
-pdf.table([
-    ["ID", "Equipment", "Severity", "Timestamp", "Resolution"],
-    ["INC-101", "Zone 4 Sensor", "Low", "14:22 UTC", "Auto-recalibrated"],
-    ["INC-102", "Bearing B-12", "Medium", "18:05 UTC", "Lubricant replenished"],
-    ["INC-103", "Exhaust Valve", "Low", "21:40 UTC", "Inspected - Nominal"],
-], col_widths=[70, 110, 80, 90, 150], header=True)
-
-# 6. Styled Card / Callout
+# 5. Highlight & Container Primitives
 pdf.card([
-    pdf.create_heading("Actionable Recommendations", level=3),
-    pdf.create_text("1. Schedule quarterly thermal imaging inspection on main gearboxes."),
-    pdf.create_text("2. Retain backup PLC configuration snapshots on sovereign encrypted storage.")
-], bg_color="#F8FAFC", border_color="#E2E8F0", padding=12)
+    pdf.create_heading("Scope Inclusions", level=3, size=12),
+    pdf.create_text("1. Cloud-native architecture design and infrastructure-as-code automation.\n"
+                    "2. Complete CI/CD pipeline implementation with automated security gates.")
+], padding=10)
 
-# 7. Dividers & Spacers
-pdf.divider(thickness=1, space_before=15, space_after=15)
-pdf.spacer(height=10)
+pdf.callout("All intellectual property developed under this engagement transfers directly upon milestone completion.", label="Legal Terms")
 
-# 8. Save
-pdf.save("audit_brief.pdf")
+# 6. Data & Tabular Presentation
+pdf.heading("Milestone & Investment Schedule", level=2, size=14)
+pdf.table([
+    ["Phase", "Key Deliverable", "Timeline", "Target Date", "Investment"],
+    ["Discovery", "Architecture Blueprint & Threat Model", "Weeks 1–3", "Nov 15", "$24,000"],
+    ["Core Build", "API Framework & Microservices Alpha", "Weeks 4–8", "Dec 20", "$52,000"],
+    ["Validation", "Integration Testing & Staging Deploy", "Weeks 9–11", "Jan 18", "$30,000"],
+    ["Production", "Zero-downtime Rollout & Handover", "Week 12", "Feb 01", "$14,000"],
+], col_widths=[65, 180, 75, 75, 75], header=True)
+
+# 7. Metrics & KPI Grid
+pdf.kpis([
+    {"value": "$120,000", "label": "Total Project Investment"},
+    {"value": "12 Weeks", "label": "Estimated Duration"},
+    {"value": "100%", "label": "Milestone Acceptance Guarantee"}
+], cols=3)
+
+# 8. Visual Spacers & Dividers
+pdf.divider(thickness=1, space_before=12, space_after=12)
+pdf.spacer(height=8)
+
+# 9. Multi-Page Flow
+# pdf.page_break()  # Use when content should begin cleanly on a new page
+
+# 10. Save Contract
+pdf.save("proposal.pdf")
 ```
 
-## Professional PDF Design Guidelines
-1. **Clear Typographical Scale**:
-   - Title: 20pt – 24pt bold.
-   - Section Headings: 14pt – 16pt bold.
-   - Subheadings: 12pt – 13pt bold.
-   - Body text: 10pt – 11pt with 13pt – 15pt line leading.
-2. **Visual Rhythm & Chunking**:
-   - Break walls of text into styled cards, callouts, or tables.
-   - Pair textual narrative with a structured table or KPI summary.
-3. **Margins & Padding**:
-   - Maintain at least 54pt (0.75 in) page margins for print and digital readability.
-   - Use table cell padding (6pt–8pt) so numbers and labels have breathing room.
+## Composition Guidelines
+1. **Match Structure to Purpose**:
+   - For letters or memos: Skip big banners; use a clean recipient block, date, subject line, concise body, and sign-off.
+   - For resumes: Use compact headers, two-column sidebars, skill bullet grids, and chronological entries.
+   - For proposals or technical docs: Use banners, executive summaries, structured tables, and highlighted callouts.
+2. **Visual Hierarchy & Balance**:
+   - Establish clear typographical contrast between headings and body text.
+   - Use whitespace (`pdf.spacer`, cell padding, column spacing) to avoid visual fatigue.
+3. **Safety Constraints**:
+   - Do NOT write raw Low-level ReportLab drawing primitives or manipulate internal flowable pointers. Use `pdf_helpers` primitives directly.
