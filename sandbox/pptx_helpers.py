@@ -31,6 +31,7 @@ Example:
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -43,6 +44,24 @@ from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
+
+pptx_helpers = sys.modules[__name__]
+
+__all__ = [
+    "Deck",
+    "split",
+    "vsplit",
+    "grid",
+    "pad",
+    "SW",
+    "SH",
+    "M",
+    "GAP",
+    "CW",
+    "CH",
+    "BODY",
+    "pptx_helpers",
+]
 
 # --------------------------------------------------------------------------- #
 # Canvas Geometry & Constants
@@ -184,6 +203,14 @@ def _effects(shape: Any, shadow: bool) -> None:
 class Deck:
     """Flexible PowerPoint presentation builder giving the LLM full composition control."""
 
+    SW: float = SW
+    SH: float = SH
+    M: float = M
+    GAP: float = GAP
+    CW: float = CW
+    CH: float = CH
+    BODY: tuple[float, float, float, float] = BODY
+
     def __init__(
         self,
         theme: str = "midnight",
@@ -205,6 +232,18 @@ class Deck:
         self.warnings: list[str] = []
         self._n = 0
         self._num: dict[int, int] = {}
+        self.SW = SW
+        self.SH = SH
+        self.M = M
+        self.GAP = GAP
+        self.CW = CW
+        self.CH = CH
+        self.BODY = BODY
+
+    @property
+    def slides(self) -> Any:
+        """Expose pptx presentation slides collection directly."""
+        return self.prs.slides
 
     def color(self, name_or_hex: str) -> str:
         """Resolve a color name from current theme or return clean hex."""

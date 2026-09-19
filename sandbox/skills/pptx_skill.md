@@ -22,6 +22,28 @@ Import the SDK classes, layout helpers, and canvas constants:
 from pptx_helpers import Deck, split, vsplit, grid, pad, SW, SH, CW, CH, M, BODY
 ```
 
+### Quick Start Example
+```python
+from pptx_helpers import Deck, split, grid, pad, SW, SH, CW, CH, M, BODY
+
+d = Deck(theme="teal")
+
+# Slide 1: Title Slide
+d.title_slide(
+    title="Main Title Here",
+    subtitle="Subtitle Description Here"
+)
+
+# Slide 2: Content Slide with Cards
+s2 = d.content_slide("Key Capabilities", kicker="PILLARS")
+d.cards(s2, [
+    {"title": "Feature 1", "body": "Description of the first capability."},
+    {"title": "Feature 2", "body": "Description of the second capability."}
+])
+
+d.save("presentation.pptx")
+```
+
 ### 1. Canvas Geometry & Layout Constants
 
 The canvas uses a widescreen 16:9 aspect ratio measured in inches:

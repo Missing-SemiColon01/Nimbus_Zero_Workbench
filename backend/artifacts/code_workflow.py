@@ -479,11 +479,61 @@ class CodeArtifactWorkflow:
                 except Exception:
                     pass
 
+        # Example pattern to guide LLM with correct imports and API calls
+        template_example = ""
+        if artifact_type in {"pptx", "presentation"}:
+            template_example = (
+                "Example Pattern to follow:\n"
+                "```python\n"
+                "from pptx_helpers import Deck, split, grid, pad, SW, SH, CW, CH, M, BODY\n\n"
+                "d = Deck(theme=\"teal\")\n\n"
+                "# Slide 1: Title Slide\n"
+                "d.title_slide(\n"
+                "    title=\"Title of Presentation\",\n"
+                "    subtitle=\"Subtitle or Summary\"\n"
+                ")\n\n"
+                "# Slide 2: Content Slide with Cards / KPIs / Text\n"
+                "s2 = d.content_slide(\"Key Topic\", kicker=\"OVERVIEW\")\n"
+                "d.cards(s2, [\n"
+                "    {\"title\": \"Card 1\", \"body\": \"Details about item 1.\"},\n"
+                "    {\"title\": \"Card 2\", \"body\": \"Details about item 2.\"}\n"
+                "])\n\n"
+                f"d.save('{filename}')\n"
+                "```\n"
+            )
+        elif artifact_type in {"docx", "document"}:
+            template_example = (
+                "Example Pattern to follow:\n"
+                "```python\n"
+                "from docx_helpers import DocxBuilder\n\n"
+                "doc = DocxBuilder(theme=\"modern\")\n"
+                "doc.heading(\"Document Title\", level=1)\n"
+                "doc.text(\"Introductory summary text...\")\n"
+                "doc.heading(\"Key Highlights\", level=2)\n"
+                "doc.bullet(\"First key item\")\n"
+                "doc.bullet(\"Second key item\")\n"
+                f"doc.save('{filename}')\n"
+                "```\n"
+            )
+        elif artifact_type == "pdf":
+            template_example = (
+                "Example Pattern to follow:\n"
+                "```python\n"
+                "from pdf_helpers import PdfBuilder\n\n"
+                "pdf = PdfBuilder(theme=\"modern\")\n"
+                "pdf.banner(\"Document Title\", subtitle=\"Subtitle or date\")\n"
+                "pdf.heading(\"Summary\", level=2)\n"
+                "pdf.text(\"Overview narrative...\")\n"
+                f"pdf.save('{filename}')\n"
+                "```\n"
+            )
+
         if skill_content:
             guidance = (
                 f"=== Design & Engineering Skill Reference ===\n"
                 f"{skill_content}\n"
-                f"============================================\n"
+                f"============================================\n\n"
+                f"{template_example}\n"
                 f"- Use the pre-installed helper module (`pptx_helpers`, `docx_helpers`, or `pdf_helpers`) available in the workspace.\n"
                 f"- Save the deliverable as '{filename}' (or '{expected_ext}' in current working directory).\n"
             )
