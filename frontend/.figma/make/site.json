@@ -1,0 +1,10 @@
+{
+  "description": "Empowering industrial organizations, this platform enables secure AI-driven analysis of documents, images, and data, facilitating efficient workflows and insights.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

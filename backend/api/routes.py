@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
+import asyncio
 import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.knowledge.retriever import KnowledgeRetriever, get_retriever
 from backend.agents.artifact_detection import detect_artifact_intent
@@ -23,6 +24,7 @@ from backend.schemas.knowledge import (
 )
 from backend.schemas.sandbox import SandboxRunRequest, SandboxRunResponse
 from backend.schemas.tasks import TaskCreate, TaskResponse
+from backend.agents.events import AgentEventStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +222,95 @@ async def create_task(payload: TaskCreate, request: Request):
         approval_requests=state.approval_requests,
     )
 
+
+
+# -- Streaming SSE endpoint ---------------------------------------------------
+
+@router.post("/tasks/stream")
+async def stream_task(payload: TaskCreate, request: Request) -> StreamingResponse:
+    """
+    Execute a task and stream real-time agent activity events via Server-Sent Events.
+
+    Events are JSON-encoded ``data: {...}\\n\\n`` lines with the following types:
+    ``task_init``, ``thought``, ``tool_call_start``, ``tool_call_log``,
+    ``tool_call_end``, ``content_delta``, ``artifact_ready``, ``task_complete``,
+    ``task_error``, ``done``.
+
+    Clients should use ``fetch()`` with ``ReadableStream`` (not ``EventSource``)
+    because this route requires a POST body.
+    """
+    streamer = AgentEventStreamer()
+    agent = request.app.state.agent
+    settings = request.app.state.settings
+
+    async def _run_task() -> None:
+        """Run in background — push events; always emit done on exit."""
+        try:
+            artifact_intent = detect_artifact_intent(payload.request, payload.task_type)
+            generate_artifact = getattr(agent, "generate_artifact", None)
+
+            if artifact_intent is not None and callable(generate_artifact):
+                await generate_artifact(
+                    payload.request,
+                    task_type=payload.task_type,
+                    approved_tools=payload.approved_tools,
+                    generation_mode=payload.generation_mode,
+                    streamer=streamer,
+                )
+            else:
+                uploads_dir: Path = settings.data_dir / "uploads"
+                document_paths = [
+                    str(_resolve_inside(uploads_dir, dp))
+                    for dp in payload.document_paths
+                ]
+                documents = [*payload.documents, *document_paths]
+                required_capabilities = payload.required_capabilities
+                if documents and payload.task_type is None and not payload.capabilities:
+                    required_capabilities = {"document_understanding"}
+
+                state, model_response = await agent.run(
+                    payload.request,
+                    required_capabilities,
+                    payload.modality,
+                    images=payload.images,
+                    documents=documents,
+                    approved_tools=payload.approved_tools,
+                    streamer=streamer,
+                )
+
+                # Stream the final response as content_delta chunks
+                if state.final_response or model_response.content:
+                    final_text = state.final_response or model_response.content
+                    # Emit in ~30-char chunks for smooth visual streaming
+                    chunk_size = 30
+                    for i in range(0, len(final_text), chunk_size):
+                        streamer.emit_content_delta(final_text[i:i + chunk_size])
+                        await asyncio.sleep(0)  # yield to event loop between chunks
+
+                streamer.emit_task_complete(
+                    task_id=state.task_id,
+                    model=state.selected_model,
+                    provider=state.provider,
+                    tool_count=len(state.tool_results or []),
+                )
+        except Exception as exc:
+            streamer.emit_task_error(str(exc))
+        finally:
+            streamer.emit_done()
+
+    # Fire the agent task in the background; SSE drains the queue concurrently
+    asyncio.create_task(_run_task())
+
+    return StreamingResponse(
+        content=streamer,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 # -- Knowledge & Ingest API (Day 2 — Task 2.5) ----------------------------------

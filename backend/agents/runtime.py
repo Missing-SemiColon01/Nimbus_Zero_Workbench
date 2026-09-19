@@ -23,6 +23,7 @@ from backend.models.router import ModelRouter
 from backend.security.policy import PolicyDecision, PolicyEngine
 from backend.tools.contracts import ToolResult
 from backend.tools.registry import ToolRegistry
+from backend.agents.events import AgentEventStreamer
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,7 @@ class AgentRuntime:
         images: list[str] | None = None,
         documents: list[str] | None = None,
         system_prompt: str | None = None,
+        streamer: AgentEventStreamer | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         """Run the agent workflow for one task with reliability controls."""
         start_time = time.perf_counter()
@@ -147,6 +149,16 @@ class AgentRuntime:
         effective_max_retries = max_retries if max_retries is not None else self.config.max_retries
         effective_max_steps = max_steps if max_steps is not None else self.config.max_steps
         effective_tool_allowlist = self._effective_tool_allowlist(tool_allowlist)
+
+        # Store streamer on the instance so graph nodes can access it
+        self._streamer = streamer
+
+        if streamer is not None:
+            streamer.emit_task_init(
+                task_id=resolved_task_id,
+                capabilities=sorted(resolved_capabilities),
+            )
+            streamer.emit_thought("Validating request and routing to best available model...")
 
         initial_state: AgentGraphState = {
             "task_id": resolved_task_id,
@@ -357,6 +369,9 @@ class AgentRuntime:
         """Validate input state fields inside the graph workflow and transition to running."""
         step_count, node_history = self._track_step(state, "validate_input")
         validate_state(state, require_model=False)
+        streamer: AgentEventStreamer | None = getattr(self, "_streamer", None)
+        if streamer is not None:
+            streamer.emit_thought("Selecting model and preparing request...")
         return {
             "status": "running",
             "step_count": step_count,
@@ -375,6 +390,9 @@ class AgentRuntime:
     async def _generate_response(self, state: AgentGraphState) -> dict[str, Any]:
         """Route and generate through the existing provider abstraction with retry limits."""
         step_count, node_history = self._track_step(state, "generate_response")
+        streamer: AgentEventStreamer | None = getattr(self, "_streamer", None)
+        if streamer is not None:
+            streamer.emit_thought("Generating response...")
 
         model_request = ModelRequest(
             prompt=self._model_prompt(state),
@@ -473,7 +491,7 @@ class AgentRuntime:
             if not tool_calls:
                 return response, tool_results, approval_requests
 
-            round_results = [await self._execute_tool_call(tool_call, state) for tool_call in tool_calls]
+            round_results = [await self._execute_tool_call_with_events(tool_call, state) for tool_call in tool_calls]
             tool_results.extend(round_results)
             approval_requests.extend(
                 self._approval_request(tool_call, result)
@@ -539,6 +557,52 @@ class AgentRuntime:
             return None
         call_id = item.get("id") if isinstance(item.get("id"), str) else None
         return ToolCall(name=name.strip(), arguments=arguments, id=call_id)
+
+    async def _execute_tool_call_with_events(
+        self,
+        tool_call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolExecutionResult:
+        """Wrapper around _execute_tool_call that emits SSE events before/after execution."""
+        import time as _time
+        streamer: AgentEventStreamer | None = getattr(self, "_streamer", None)
+        tool_descriptions = {
+            "sandbox.execute": "Executing Python code in isolated Docker sandbox",
+            "rag.search": "Searching knowledge base for relevant context",
+            "vision.analyze": "Analyzing image or document with vision model",
+            "artifact.document.create": "Creating Word document",
+            "artifact.presentation.create": "Generating PowerPoint presentation with python-pptx",
+            "artifact.pdf.create": "Generating PDF document with ReportLab",
+            "artifact.spreadsheet.create": "Creating Excel spreadsheet",
+            "artifact.validate": "Validating generated artifact",
+        }
+        description = tool_descriptions.get(tool_call.name, f"Running {tool_call.name}")
+        if streamer is not None:
+            streamer.emit_tool_call_start(tool_call.name, description)
+        t0 = _time.perf_counter()
+        result = await self._execute_tool_call(tool_call, state)
+        duration_ms = round((_time.perf_counter() - t0) * 1000, 1)
+        if streamer is not None:
+            # Emit artifact event when a tool produces file artifacts
+            if result.success and result.artifacts:
+                for artifact_path in result.artifacts:
+                    from pathlib import Path as _Path
+                    p = _Path(artifact_path)
+                    size = p.stat().st_size if p.exists() else 0
+                    ext = p.suffix.lstrip(".").lower()
+                    streamer.emit_artifact_ready(
+                        name=p.name,
+                        file_type=ext,
+                        size_bytes=size,
+                        download_url=f"/api/v1/artifacts/{p.name}/download",
+                    )
+            streamer.emit_tool_call_end(
+                tool=tool_call.name,
+                success=result.success,
+                duration_ms=duration_ms,
+                summary=result.error if not result.success else None,
+            )
+        return result
 
     async def _execute_tool_call(self, tool_call: ToolCall, state: AgentGraphState) -> ToolExecutionResult:
         if self.tools is None:

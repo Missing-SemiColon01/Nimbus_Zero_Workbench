@@ -18,6 +18,7 @@ from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter, NoCompatibleModelError
 from backend.sandbox.coding_workflow import extract_python_code
 from backend.tools.registry import ToolRegistry
+from backend.agents.events import AgentEventStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ MIME_TYPES = {
     "document": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "presentation": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "spreadsheet": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
 EXTENSION_MAP = {
@@ -36,6 +39,8 @@ EXTENSION_MAP = {
     "document": ".docx",
     "pptx": ".pptx",
     "presentation": ".pptx",
+    "xlsx": ".xlsx",
+    "spreadsheet": ".xlsx",
 }
 
 
@@ -135,6 +140,7 @@ class CodeArtifactWorkflow:
         max_iterations: int | None = None,
         timeout_seconds: int | None = None,
         required_text: list[str] | None = None,
+        streamer: AgentEventStreamer | None = None,
     ) -> CodeArtifactResult:
         start_time = time.perf_counter()
         resolved_task_id = task_id or str(uuid.uuid4())
@@ -221,6 +227,9 @@ class CodeArtifactWorkflow:
                 code = extract_python_code(response.content)
                 last_code = code
 
+                if streamer is not None:
+                    streamer.emit_thought(f"Attempt {round_index + 1}: executing generated code in Docker sandbox...")
+
                 # Execute inside the isolated sandbox (NEVER on the host)
                 attempt, candidate_artifact, tool_res_dict = await self._execute_and_verify(
                     code=code,
@@ -235,6 +244,15 @@ class CodeArtifactWorkflow:
                 attempts.append(attempt)
                 if tool_res_dict:
                     tool_results.append(tool_res_dict)
+
+                # Stream sandbox stdout/stderr as log events
+                if streamer is not None:
+                    for log_line in (attempt.stdout or "").splitlines():
+                        if log_line.strip():
+                            streamer.emit_tool_call_log("sandbox.execute", log_line)
+                    for err_line in (attempt.stderr or "").splitlines():
+                        if err_line.strip():
+                            streamer.emit_tool_call_log("sandbox.execute", f"[stderr] {err_line}")
 
                 if attempt.verification_passed and candidate_artifact is not None:
                     duration = round(time.perf_counter() - start_time, 4)
@@ -436,7 +454,7 @@ class CodeArtifactWorkflow:
             validation = self.pdf_validator.validate(artifact, required_text=required_text)
             return validation.valid, validation.findings
 
-        if norm_type in {"docx", "pptx", "document", "presentation"}:
+        if norm_type in {"docx", "pptx", "document", "presentation", "xlsx", "spreadsheet"}:
             validation = self.office_validator.validate(
                 artifact,
                 required_text=required_text,
@@ -484,6 +502,14 @@ class CodeArtifactWorkflow:
                 f"- Save the presentation to '{filename}' (or any '{expected_ext}' in the current working directory).\n"
                 "- Create multiple distinct slides (e.g. title slide, overview, key points/findings, conclusion/next steps).\n"
                 "- Add slide titles, bullet points, text boxes, and tables where appropriate.\n"
+            )
+        elif artifact_type in {"xlsx", "spreadsheet"}:
+            guidance = (
+                "Use 'openpyxl' (from openpyxl import Workbook; from openpyxl.styles import Font, PatternFill, Alignment, Border, Side) to create a styled Excel spreadsheet.\n"
+                f"- Save the workbook to '{filename}' (or any '{expected_ext}' in the current working directory).\n"
+                "- Create structured worksheets (e.g. Executive Summary, Data, Calculations).\n"
+                "- Add formatted headers with background fills and bold text.\n"
+                "- Include calculated summary formulas (=SUM, =AVERAGE, etc.) and auto-adjust column widths.\n"
             )
         else:
             guidance = f"Write a Python script to generate a valid {expected_ext} deliverable saved to '{filename}'.\n"
@@ -535,6 +561,8 @@ class CodeArtifactWorkflow:
             return "pdf"
         if "presentation" in cleaned or "pptx" in cleaned or "slide" in cleaned:
             return "pptx"
+        if "spreadsheet" in cleaned or "excel" in cleaned or "xlsx" in cleaned or "workbook" in cleaned:
+            return "xlsx"
         if "document" in cleaned or "docx" in cleaned or "word" in cleaned or "report" in cleaned:
             return "docx"
         return cleaned

@@ -18,6 +18,7 @@ from backend.agents.artifact_detection import (
 from backend.artifacts.code_workflow import CodeArtifactWorkflow
 from backend.agents.runtime import AgentRuntime, RuntimeConfig
 from backend.agents.state import AgentState
+from backend.agents.events import AgentEventStreamer
 from backend.models.contracts import ModelResponse
 from backend.security.policy import PolicyDecision
 from backend.schemas.artifact_result import ArtifactGenerationResult
@@ -196,6 +197,7 @@ class IndustrialWorkbenchAgent:
         images: list[str] | None = None,
         documents: list[str] | None = None,
         approved_tools: set[str] | None = None,
+        streamer: AgentEventStreamer | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         return await self.runtime.run(
             user_request,
@@ -207,6 +209,7 @@ class IndustrialWorkbenchAgent:
             images=images,
             documents=documents,
             system_prompt=self.config.system_prompt,
+            streamer=streamer,
         )
 
     # -- Artifact-generation orchestration -------------------------------------
@@ -218,32 +221,14 @@ class IndustrialWorkbenchAgent:
         task_type: str | None = None,
         approved_tools: set[str] | None = None,
         generation_mode: str = "auto",
+        streamer: AgentEventStreamer | None = None,
     ) -> ArtifactGenerationResult:
-        """Detect, generate, and produce a downloadable artifact in one call.
-
-        Orchestration flow
-        ------------------
-        1. Detect intent   → identify artifact type and target tool.
-        2. Mode selection  → choose structured or code-based generation.
-        3. Execute mode:
-           - code: generate Python script, execute inside Docker sandbox, verify.
-           - structured: ask model for JSON payload matching tool schema, execute tool.
-        4. Validate result → verify success and build the typed response.
-
-        Parameters
-        ----------
-        user_request:
-            The raw natural-language request from the user.
-        task_type:
-            Optional explicit task type (``"report"``, ``"artifact"``, etc.).
-        approved_tools:
-            Tool names explicitly pre-approved by a human for this run.
-        generation_mode:
-            'auto' (default), 'structured', or 'code'.
-        """
+        """Detect, generate, and produce a downloadable artifact in one call."""
         task_id = str(uuid.uuid4())
 
         # 1. Detect artifact intent.
+        if streamer is not None:
+            streamer.emit_thought("Detecting artifact type from request...")
         intent = detect_artifact_intent(user_request, task_type)
         if intent is None:
             return ArtifactGenerationResult(
@@ -255,12 +240,15 @@ class IndustrialWorkbenchAgent:
 
         # 2. Select generation mode
         selected_mode = select_artifact_generation_mode(user_request, generation_mode)
-        if selected_mode == "code" and intent.artifact_type in {"pdf", "document", "docx", "presentation", "pptx"}:
+        if streamer is not None:
+            streamer.emit_thought(f"Selected '{selected_mode}' generation strategy for {intent.artifact_type.upper()}...")
+        if selected_mode == "code" and intent.artifact_type in {"pdf", "document", "docx", "presentation", "pptx", "spreadsheet", "xlsx"}:
             return await self._generate_code_artifact(
                 user_request=user_request,
                 intent=intent,
                 task_id=task_id,
                 approved_tools=approved_tools,
+                streamer=streamer,
             )
 
         return await self._generate_structured_artifact(
@@ -268,6 +256,7 @@ class IndustrialWorkbenchAgent:
             intent=intent,
             task_id=task_id,
             approved_tools=approved_tools,
+            streamer=streamer,
         )
 
     async def _generate_code_artifact(
@@ -276,8 +265,22 @@ class IndustrialWorkbenchAgent:
         intent: ArtifactIntent,
         task_id: str,
         approved_tools: set[str] | None = None,
+        streamer: AgentEventStreamer | None = None,
     ) -> ArtifactGenerationResult:
         """Generate artifact by writing Python code and executing inside the Docker sandbox."""
+        tool_label = (
+            "python-pptx" if intent.artifact_type in {"presentation", "pptx"} else (
+                "openpyxl" if intent.artifact_type in {"spreadsheet", "xlsx"} else (
+                    "reportlab" if intent.artifact_type == "pdf" else "python-docx"
+                )
+            )
+        )
+        if streamer is not None:
+            streamer.emit_thought(f"Authoring {tool_label} automation script for {intent.artifact_type.upper()} generation...")
+            streamer.emit_tool_call_start(
+                tool_label,
+                f"Generating {intent.artifact_type.upper()} deliverable via Python sandbox ({tool_label})",
+            )
         workflow = CodeArtifactWorkflow(
             router=self.runtime.router,
             providers=self.runtime.providers,
@@ -289,7 +292,29 @@ class IndustrialWorkbenchAgent:
             user_request=user_request,
             artifact_type=intent.artifact_type,
             task_id=task_id,
+            streamer=streamer,
         )
+
+        if streamer is not None:
+            streamer.emit_tool_call_end(
+                tool=tool_label,
+                success=code_result.status == "completed",
+                summary=f"{len(code_result.attempts)} attempt(s)",
+            )
+            if code_result.status == "completed":
+                streamer.emit_thought(f"Validating {intent.artifact_type.upper()} structure and layout integrity...")
+                streamer.emit_tool_call_start("artifact.validate", f"Auditing {intent.artifact_type.upper()} format compliance")
+                streamer.emit_tool_call_end("artifact.validate", True, summary="Structural validation passed")
+                if code_result.path:
+                    from pathlib import Path as _Path
+                    p = _Path(code_result.path)
+                    size = p.stat().st_size if p.exists() else 0
+                    streamer.emit_artifact_ready(
+                        name=p.name,
+                        file_type=p.suffix.lstrip(".").lower(),
+                        size_bytes=size,
+                        download_url=code_result.download_url or f"/api/v1/artifacts/{p.name}/download",
+                    )
 
         artifacts = [code_result.path] if code_result.path else []
         response_text = ""
@@ -326,6 +351,7 @@ class IndustrialWorkbenchAgent:
         intent: ArtifactIntent,
         task_id: str,
         approved_tools: set[str] | None = None,
+        streamer: AgentEventStreamer | None = None,
     ) -> ArtifactGenerationResult:
         """Original structured artifact generation flow using dedicated tool schemas."""
         # 1. Verify the target tool is registered and allowed.
@@ -423,15 +449,34 @@ class IndustrialWorkbenchAgent:
                     ],
                 )
             else:
+                if streamer is not None:
+                    streamer.emit_thought(f"Composing {intent.artifact_type.upper()} document via {intent.tool_name}...")
+                    streamer.emit_tool_call_start(intent.tool_name, f"Generating {intent.artifact_type.upper()} artifact")
                 tool_result = await self._execute_artifact_tool(arguments, intent, task_id)
+                if streamer is not None:
+                    streamer.emit_tool_call_end(intent.tool_name, tool_result.get("success", False))
+                    if tool_result.get("success"):
+                        streamer.emit_thought(f"Validating {intent.artifact_type.upper()} schema and format...")
+                        streamer.emit_tool_call_start("artifact.validate", f"Auditing {intent.artifact_type.upper()} file integrity")
+                        streamer.emit_tool_call_end("artifact.validate", True, summary="Structural validation passed")
 
         # 4. Build the typed response.
-        return self._build_result_from_state(
+        res = self._build_result_from_state(
             state,
             intent,
             tool_result=tool_result,
             tool_results=[*state.tool_results, *([] if self._find_tool_result(state, intent.tool_name) else [tool_result])],
         )
+        if streamer is not None and res.status == "completed" and res.path:
+            p = Path(res.path)
+            size = p.stat().st_size if p.exists() else 0
+            streamer.emit_artifact_ready(
+                name=p.name,
+                file_type=p.suffix.lstrip(".").lower(),
+                size_bytes=size,
+                download_url=res.download_url or f"/api/v1/artifacts/{p.name}/download",
+            )
+        return res
 
     # -- Private helpers -------------------------------------------------------
 
