@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Copy, RefreshCw, ThumbsUp, ThumbsDown, Check, Download, ExternalLink, FileText } from 'lucide-react';
 import { AgentActivity } from './AgentActivity';
 import { MessageAttachment } from './FileAttachment';
 import { useToast } from '../ui/Toast';
-import type { Message } from '../../types';
+import type { Message, AgentStep } from '../../types';
 
 interface ChatMessageProps {
   message: Message;
@@ -13,9 +13,11 @@ interface ChatMessageProps {
   onUpdateMessage?: (updates: Partial<Message>) => void;
   streaming?: boolean;
   streamContent?: string;
+  /** Live steps from SSE while streaming (shown instead of message.agentSteps) */
+  liveSteps?: AgentStep[];
 }
 
-export function ChatMessage({ message, onLike, onDislike, onRegenerate, streaming, streamContent }: ChatMessageProps) {
+export function ChatMessage({ message, onLike, onDislike, onRegenerate, streaming, streamContent, liveSteps }: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
   const { showToast } = useToast();
 
@@ -72,33 +74,58 @@ export function ChatMessage({ message, onLike, onDislike, onRegenerate, streamin
           </span>
         </div>
 
-        <div className="prose-ai text-sm text-[var(--text-secondary)] leading-relaxed">
-          <FormattedContent content={content} />
-          {streaming && <span className="inline-block w-0.5 h-4 bg-[var(--accent)] cursor-blink ml-0.5 align-middle" />}
-        </div>
+        {/* Agent Activity — ABOVE the content, matching Claude/ChatGPT layout */}
+        {(() => {
+          const stepsToShow = streaming && liveSteps && liveSteps.length > 0
+            ? liveSteps
+            : message.agentSteps;
+          return stepsToShow && stepsToShow.length > 0 ? (
+            <AgentActivity steps={stepsToShow} streaming={streaming} />
+          ) : null;
+        })()}
 
-        {/* Agent Activity */}
-        {message.agentSteps && message.agentSteps.length > 0 && (
-          <AgentActivity steps={message.agentSteps} streaming={streaming} />
+        {/* Response content — shown below the activity panel */}
+        {(content || !streaming) && (
+          <div className="prose-ai text-sm text-[var(--text-secondary)] leading-relaxed mt-2">
+            <FormattedContent content={content} />
+            {streaming && <span className="inline-block w-0.5 h-4 bg-[var(--accent)] cursor-blink ml-0.5 align-middle" />}
+          </div>
         )}
+
+        {/* While streaming and no content yet: subtle "working" placeholder */}
+        {streaming && !content && (
+          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+            <span className="inline-block w-0.5 h-4 bg-[var(--accent)]/60 animate-pulse" />
+          </div>
+        )}
+
 
         {/* Generated Files */}
         {message.generatedFiles && message.generatedFiles.length > 0 && (
           <div className="mt-3 flex flex-col gap-2">
             {message.generatedFiles.map(f => (
-              <div key={f.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-color)] max-w-[320px]">
-                <FileText size={15} className="text-[var(--danger)] flex-shrink-0" />
+              <div key={f.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--bg-card)] border border-[var(--accent)]/20 max-w-[360px] shadow-sm">
+                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center">
+                  <FileText size={14} className="text-[var(--accent)]" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium text-[var(--text-primary)] truncate">{f.name}</div>
-                  <div className="text-[10px] text-[var(--text-muted)] uppercase">{f.type} · {f.size}</div>
+                  <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide">{f.type} · {f.size}</div>
                 </div>
                 <div className="flex gap-1">
-                  <button className="px-2 py-1 text-[10px] rounded bg-[var(--bg-input)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1">
-                    <ExternalLink size={9} /> Open
-                  </button>
-                  <button onClick={() => handleDownloadReport(f.name)} className="px-2 py-1 text-[10px] rounded bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors flex items-center gap-1">
-                    <Download size={9} /> Download
-                  </button>
+                  {f.download_url ? (
+                    <a
+                      href={f.download_url}
+                      download={f.name}
+                      className="px-2 py-1 text-[10px] rounded bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors flex items-center gap-1"
+                    >
+                      <Download size={9} /> Download
+                    </a>
+                  ) : (
+                    <button onClick={() => handleDownloadReport(f.name)} className="px-2 py-1 text-[10px] rounded bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors flex items-center gap-1">
+                      <Download size={9} /> Download
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -131,7 +158,7 @@ export function ChatMessage({ message, onLike, onDislike, onRegenerate, streamin
 function FormattedContent({ content }: { content: string }) {
   // Simple markdown-ish renderer
   const lines = content.split('\n');
-  const elements: React.ReactNode[] = [];
+  const elements: ReactNode[] = [];
   let i = 0;
 
   while (i < lines.length) {

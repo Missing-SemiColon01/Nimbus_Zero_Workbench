@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 import { Wrench, ShieldCheck, ScanEye, FileSearch, Play, CheckCircle, Loader, Clock } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { AgentActivity } from '../components/chat/AgentActivity';
@@ -6,7 +6,7 @@ import { useToast } from '../components/ui/Toast';
 import type { AgentStep } from '../types';
 import { DEMO_AGENTS } from '../services/mockData';
 
-const ICONS: Record<string, React.ComponentType<any>> = { Wrench, ShieldCheck, ScanEye, FileSearch };
+const ICONS: Record<string, ComponentType<any>> = { Wrench, ShieldCheck, ScanEye, FileSearch };
 
 const AGENT_STEPS: Record<string, string[]> = {
   'agent-1': ['Loaded maintenance records', 'Parsed equipment history', 'Identified anomaly patterns', 'Cross-referenced failure database', 'Generated maintenance report'],

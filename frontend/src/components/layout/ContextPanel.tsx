@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronRight, FileText, Wrench, Shield, Database, BarChart2, FileSearch, X, CheckCircle } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import type { Session } from '../../types';
@@ -124,7 +124,7 @@ export function ContextPanel({ session, onClose, asDrawer }: ContextPanelProps) 
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="px-4 py-3 border-b border-[var(--border-color)]">
       <div className="text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase mb-2">{title}</div>

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, type ChangeEvent } from 'react';
 import { Search, Upload, FileText, FileSpreadsheet, File, Trash2, Download, Eye, CheckCircle, Clock, Filter } from 'lucide-react';
 import { useToast } from '../components/ui/Toast';
 import { Modal } from '../components/ui/Modal';
@@ -32,7 +32,7 @@ export function KnowledgeBase() {
       return b.uploadedAt.getTime() - a.uploadedAt.getTime();
     });
 
-  function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleUpload(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
     files.forEach(f => {
       const ext = f.name.split('.').pop()?.toLowerCase() || 'pdf';

@@ -14,6 +14,14 @@ export interface AgentStep {
   label: string;
   status: 'done' | 'active' | 'pending';
   duration?: string;
+  /** Tool name for tool-related steps, e.g. "python-pptx", "sandbox.execute" */
+  tool?: string;
+  /** Live stdout/stderr lines from tool execution */
+  logs?: string[];
+  /** Whether the log panel is expanded in the UI */
+  expanded?: boolean;
+  /** When the step started (for elapsed time display) */
+  startedAt?: number;
 }
 
 export interface GeneratedFile {
@@ -21,6 +29,10 @@ export interface GeneratedFile {
   name: string;
   type: string;
   size: string;
+  /** Backend download URL (real backend only) */
+  download_url?: string;
+  /** Preview image URL (real backend only) */
+  preview_url?: string;
 }
 
 export interface Message {
@@ -96,4 +108,44 @@ export interface AppSettings {
     auditLogging: boolean;
     secureProcessing: boolean;
   };
+}
+
+// ---------------------------------------------------------------------------
+// SSE streaming event payload types
+// ---------------------------------------------------------------------------
+
+export interface TaskInitPayload {
+  task_id: string;
+  model?: string;
+  intent?: string;
+  capabilities?: string[];
+}
+
+export interface ToolCallStartPayload {
+  tool: string;
+  description: string;
+  args_preview?: Record<string, unknown>;
+}
+
+export interface ToolCallEndPayload {
+  tool: string;
+  success: boolean;
+  duration_ms?: number;
+  summary?: string;
+}
+
+export interface ArtifactPayload {
+  name: string;
+  file_type: string;
+  size_bytes: number;
+  download_url: string;
+  preview_url?: string;
+}
+
+export interface TaskCompletePayload {
+  task_id: string;
+  duration_ms: number;
+  model?: string;
+  provider?: string;
+  tool_count?: number;
 }

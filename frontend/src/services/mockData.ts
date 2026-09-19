@@ -1,4 +1,4 @@
-import type { Session, KnowledgeDoc, Agent, Workflow } from '../types';
+import type { Session, KnowledgeDoc, Agent } from '../types';
 
 export const DEMO_SESSIONS: Session[] = [
   {

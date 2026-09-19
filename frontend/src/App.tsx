@@ -3,7 +3,6 @@ import { BrowserRouter, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { ToastProvider } from './components/ui/Toast';
-import { Tooltip } from './components/ui/Tooltip';
 import { Chat } from './pages/Chat';
 import { Login } from './pages/Login';
 import { KnowledgeBase } from './pages/KnowledgeBase';

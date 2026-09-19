@@ -25,6 +25,9 @@ export const BACKEND_CONFIG = {
     systemStatus: '/system/status',
     security: '/security',
     profile: '/user/profile',
+    // Real backend endpoints
+    tasks: '/api/v1/tasks',
+    tasksStream: '/api/v1/tasks/stream',
   },
 } as const;
 

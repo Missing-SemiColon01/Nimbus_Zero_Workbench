@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type MouseEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Search, MoreHorizontal, Pin, Pencil, Trash2, MessageSquare, Settings, User } from 'lucide-react';
 import { Modal } from '../ui/Modal';
@@ -265,7 +265,7 @@ export function Sidebar({
 
 function SessionItem({ session, active, menuOpen, onSelect, onMenuToggle, onRename, onPin, onDelete, formatTime }: {
   session: Session; active: boolean; menuOpen: boolean;
-  onSelect: () => void; onMenuToggle: (e: React.MouseEvent) => void;
+  onSelect: () => void; onMenuToggle: (e: MouseEvent) => void;
   onRename: () => void; onPin: () => void; onDelete: () => void;
   formatTime: (d: Date) => string;
 }) {

@@ -2,9 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { FileText, BarChart2, Image, AlertTriangle } from 'lucide-react';
 import { ChatMessage } from '../components/chat/ChatMessage';
 import { ChatComposer } from '../components/chat/ChatComposer';
-import { generateResponse, generateAgentSteps } from '../services/aiService';
+import { generateResponse, generateAgentSteps, generateMockFiles } from '../services/aiService';
+import { isBackendAvailable } from '../hooks/useAgentStream';
+import { BACKEND_CONFIG } from '../services/backendConfig';
 import { useToast } from '../components/ui/Toast';
-import type { Session, Message, Attachment } from '../types';
+import type { Session, Message, Attachment, AgentStep, GeneratedFile } from '../types';
 
 interface ChatProps {
   session: Session | null;
@@ -23,16 +25,58 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
   const [streaming, setStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [streamContent, setStreamContent] = useState('');
+  /** Live agent steps built in real time from SSE events (or mock) */
+  const [liveSteps, setLiveSteps] = useState<AgentStep[]>([]);
+
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const stepCounterRef = useRef(0);
+  const stepsRef = useRef<AgentStep[]>([]);
+  const filesRef = useRef<GeneratedFile[]>([]);
   const { showToast } = useToast();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [session?.messages.length, streamContent]);
 
+  // ── Step helpers ────────────────────────────────────────────────────────────
+
+  const nextStepId = () => `step-${++stepCounterRef.current}`;
+
+  const addStep = useCallback((step: AgentStep) => {
+    stepsRef.current = [...stepsRef.current, step];
+    setLiveSteps([...stepsRef.current]);
+  }, []);
+
+  const updateLastStep = useCallback((updater: (s: AgentStep) => AgentStep) => {
+    if (!stepsRef.current.length) return;
+    const updated = [...stepsRef.current];
+    updated[updated.length - 1] = updater(updated[updated.length - 1]);
+    stepsRef.current = updated;
+    setLiveSteps([...stepsRef.current]);
+  }, []);
+
+  const updateStepByTool = useCallback((tool: string, updater: (s: AgentStep) => AgentStep) => {
+    const reversed = [...stepsRef.current].reverse();
+    const idx = reversed.findIndex(s => s.tool === tool);
+    if (idx < 0) return;
+    const realIdx = stepsRef.current.length - 1 - idx;
+    const updated = [...stepsRef.current];
+    updated[realIdx] = updater(updated[realIdx]);
+    stepsRef.current = updated;
+    setLiveSteps([...stepsRef.current]);
+  }, []);
+
+  // ── Send message ────────────────────────────────────────────────────────────
+
   const sendMessage = useCallback(async (content: string, attachments: Attachment[]) => {
     if (!session) return;
+
+    // Reset live step state
+    stepsRef.current = [];
+    filesRef.current = [];
+    stepCounterRef.current = 0;
+    setLiveSteps([]);
 
     const userMsg: Message = {
       id: `msg-${Date.now()}`,
@@ -59,33 +103,157 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
     abortRef.current = controller;
 
     let accumulated = '';
+
     try {
       const allMsgs = [...(session.messages || []), userMsg];
-      await generateResponse(allMsgs, chunk => {
-        accumulated += chunk;
-        setStreamContent(accumulated);
-      }, controller.signal);
 
-      // detect intent for agent steps
-      const lower = content.toLowerCase();
-      const hasImage = attachments.some(a => a.type === 'image');
-      const hasCsv = attachments.some(a => a.type === 'csv' || a.type === 'xlsx');
-      const hasDoc = attachments.some(a => a.type === 'pdf' || a.type === 'docx' || a.type === 'txt');
-      const intent = hasImage ? 'image' : hasCsv ? 'sensor' : hasDoc ? 'document' : lower.includes('sensor') || lower.includes('data') ? 'sensor' : lower.includes('report') ? 'report' : 'general';
+      if (isBackendAvailable) {
+        // ── Real backend SSE path ─────────────────────────────────────────────
+        await generateResponse(
+          allMsgs,
+          chunk => {
+            accumulated += chunk;
+            setStreamContent(accumulated);
+          },
+          controller.signal,
+          {
+            onThought(text, phase) {
+              // Mark previous active step done
+              updateLastStep(s => s.status === 'active' ? { ...s, status: 'done' } : s);
+              addStep({
+                id: nextStepId(),
+                label: text,
+                status: 'active',
+                startedAt: Date.now(),
+              });
+            },
+            onToolCallStart(tool, description) {
+              updateLastStep(s => s.status === 'active' ? { ...s, status: 'done' } : s);
+              addStep({
+                id: nextStepId(),
+                label: description,
+                status: 'active',
+                tool,
+                logs: [],
+                startedAt: Date.now(),
+              });
+            },
+            onToolCallLog(tool, line) {
+              updateStepByTool(tool, s => ({ ...s, logs: [...(s.logs ?? []), line] }));
+            },
+            onToolCallEnd(tool, success, duration_ms) {
+              updateStepByTool(tool, s => ({
+                ...s,
+                status: 'done',
+                duration: duration_ms != null ? `${(duration_ms / 1000).toFixed(1)}s` : undefined,
+              }));
+            },
+            onArtifactReady(name, fileType, sizeBytes, downloadUrl, previewUrl) {
+              const file: GeneratedFile = {
+                id: `gf-${Date.now()}`,
+                name,
+                type: fileType,
+                size: `${Math.round(sizeBytes / 1024)} KB`,
+                download_url: downloadUrl,
+                preview_url: previewUrl,
+              };
+              filesRef.current = [...filesRef.current, file];
+            },
+            onTaskComplete(durationMs, model) {
+              // Mark remaining active steps done and add summary
+              stepsRef.current = stepsRef.current.map(s =>
+                s.status === 'active' ? { ...s, status: 'done' } : s,
+              );
+              stepsRef.current.push({
+                id: nextStepId(),
+                label: `Completed in ${(durationMs / 1000).toFixed(1)}s${model ? ` · ${model}` : ''}`,
+                status: 'done',
+              });
+              setLiveSteps([...stepsRef.current]);
+            },
+            onTaskError(error) {
+              addStep({ id: nextStepId(), label: `Error: ${error}`, status: 'done' });
+            },
+          },
+        );
 
-      const agentSteps = generateAgentSteps(intent);
-      const generatedFiles = (intent === 'sensor' || intent === 'report') ? [
-        { id: `gf-${Date.now()}`, name: `analysis_report_${Date.now()}.pdf`, type: 'pdf', size: `${Math.floor(300 + Math.random() * 400)} KB` }
-      ] : undefined;
+        onUpdateMessage(session.id, aiMsgId, {
+          content: accumulated,
+          agentSteps: stepsRef.current,
+          generatedFiles: filesRef.current.length > 0 ? filesRef.current : undefined,
+        });
+      } else {
+        // ── Mock path (no backend configured) ────────────────────────────────
+        // Wire the same agentEvent callbacks so liveSteps stream in real time
+        const mockAgentEvents = {
+          onThought(text: string) {
+            updateLastStep(s => s.status === 'active' ? { ...s, status: 'done' } : s);
+            addStep({ id: nextStepId(), label: text, status: 'active', startedAt: Date.now() });
+          },
+          onToolCallStart(tool: string, description: string) {
+            updateLastStep(s => s.status === 'active' ? { ...s, status: 'done' } : s);
+            addStep({ id: nextStepId(), label: description, status: 'active', tool, logs: [], startedAt: Date.now() });
+          },
+          onToolCallLog(tool: string, line: string) {
+            updateStepByTool(tool, s => ({ ...s, logs: [...(s.logs ?? []), line] }));
+          },
+          onToolCallEnd(tool: string, success: boolean, duration_ms?: number) {
+            updateStepByTool(tool, s => ({
+              ...s,
+              status: 'done' as const,
+              duration: duration_ms != null ? `${(duration_ms / 1000).toFixed(1)}s` : undefined,
+            }));
+          },
+          onArtifactReady(name: string, fileType: string, sizeBytes: number, downloadUrl: string, previewUrl?: string) {
+            const file: GeneratedFile = {
+              id: `gf-${Date.now()}`,
+              name,
+              type: fileType,
+              size: `${Math.round(sizeBytes / 1024)} KB`,
+              download_url: downloadUrl,
+              preview_url: previewUrl,
+            };
+            filesRef.current = [...filesRef.current, file];
+          },
+        };
 
-      onUpdateMessage(session.id, aiMsgId, {
-        content: accumulated,
-        agentSteps,
-        generatedFiles,
-      });
+        await generateResponse(allMsgs, chunk => {
+          accumulated += chunk;
+          setStreamContent(accumulated);
+        }, controller.signal, mockAgentEvents);
+
+        // Finalize — mark any remaining active steps done
+        stepsRef.current = stepsRef.current.map(s =>
+          s.status === 'active' ? { ...s, status: 'done' } : s,
+        );
+
+        const lower = content.toLowerCase();
+        const hasImage = attachments.some(a => a.type === 'image');
+        const hasCsv = attachments.some(a => a.type === 'csv' || a.type === 'xlsx');
+        const hasDoc = attachments.some(a => a.type === 'pdf' || a.type === 'docx' || a.type === 'txt');
+        const intent = hasImage ? 'image'
+          : hasCsv ? 'sensor'
+          : hasDoc ? 'document'
+          : lower.includes('sensor') || lower.includes('data') ? 'sensor'
+          : lower.includes('report') ? 'report'
+          : 'general';
+
+        const generatedFiles = filesRef.current.length > 0
+          ? filesRef.current
+          : generateMockFiles(intent, content);
+
+        onUpdateMessage(session.id, aiMsgId, {
+          content: accumulated,
+          agentSteps: stepsRef.current.length > 0 ? stepsRef.current : generateAgentSteps(intent, content),
+          generatedFiles: generatedFiles.length > 0 ? generatedFiles : undefined,
+        });
+      }
     } catch {
       if (!controller.signal.aborted) {
-        onUpdateMessage(session.id, aiMsgId, { content: accumulated || 'Unable to process request. Please try again.' });
+        onUpdateMessage(session.id, aiMsgId, {
+          content: accumulated || 'Unable to process request. Please try again.',
+          agentSteps: stepsRef.current.length > 0 ? stepsRef.current : undefined,
+        });
       } else {
         onUpdateMessage(session.id, aiMsgId, { content: accumulated });
       }
@@ -93,9 +261,10 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
       setStreaming(false);
       setStreamingId(null);
       setStreamContent('');
+      setLiveSteps([]);
       abortRef.current = null;
     }
-  }, [session, onAddMessage, onUpdateMessage]);
+  }, [session, onAddMessage, onUpdateMessage, addStep, updateLastStep, updateStepByTool]);
 
   function handleStop() {
     abortRef.current?.abort();
@@ -134,6 +303,11 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
           <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] mb-6">
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)]" />
             Secure session initialized · Processing on-premise
+            {isBackendAvailable && (
+              <span className="ml-1 px-1.5 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] text-[10px] font-medium">
+                LIVE
+              </span>
+            )}
           </div>
 
           {/* Empty state */}
@@ -172,6 +346,7 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
               message={msg}
               streaming={streaming && msg.id === streamingId}
               streamContent={streaming && msg.id === streamingId ? streamContent : undefined}
+              liveSteps={streaming && msg.id === streamingId ? liveSteps : undefined}
               onLike={() => onUpdateMessage(session.id, msg.id, { liked: !msg.liked, disliked: false })}
               onDislike={() => onUpdateMessage(session.id, msg.id, { disliked: !msg.disliked, liked: false })}
               onRegenerate={() => {

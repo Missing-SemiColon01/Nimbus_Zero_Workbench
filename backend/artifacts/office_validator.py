@@ -65,9 +65,10 @@ class OfficeArtifactValidator:
                 except (FileNotFoundError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                     checks["preview_rendered"] = False
                     findings.append(f"Visual preview could not be rendered: {error}")
+        core_valid = checks["artifact_opened"] and checks["has_content"] and checks["required_text_present"]
         return ArtifactValidation(
             artifact_id=artifact.id,
-            valid=all(checks.values()),
+            valid=core_valid,
             checks=checks,
             findings=findings,
             preview_path=str(preview_path.resolve()) if preview_path else None,

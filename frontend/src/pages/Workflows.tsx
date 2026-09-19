@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, type MouseEvent } from 'react';
 import { Plus, Save, Trash2, Edit2, Copy, GitBranch, Upload, Brain, Database, BarChart2, AlertTriangle, FileText, CheckSquare } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
@@ -31,7 +31,7 @@ export function Workflows() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const { showToast } = useToast();
 
-  function handleMouseDown(e: React.MouseEvent, nodeId: string) {
+  function handleMouseDown(e: MouseEvent, nodeId: string) {
     const node = nodes.find(n => n.id === nodeId);
     if (!node || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
@@ -39,7 +39,7 @@ export function Workflows() {
     setDragOffset({ x: e.clientX - rect.left - node.x, y: e.clientY - rect.top - node.y });
   }
 
-  function handleMouseMove(e: React.MouseEvent) {
+  function handleMouseMove(e: MouseEvent) {
     if (!dragging || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(e.clientX - rect.left - dragOffset.x, rect.width - 180));

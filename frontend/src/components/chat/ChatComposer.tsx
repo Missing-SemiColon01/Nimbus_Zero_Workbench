@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, type KeyboardEvent, type DragEvent } from 'react';
 import { Send, Square, Paperclip, Image as ImageIcon, X } from 'lucide-react';
 import { AttachmentChip } from './FileAttachment';
 import { Tooltip } from '../ui/Tooltip';
@@ -30,7 +30,7 @@ export function ChatComposer({ onSend, streaming, onStop, disabled }: ChatCompos
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
+  function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -82,7 +82,7 @@ export function ChatComposer({ onSend, streaming, onStop, disabled }: ChatCompos
     }
   }
 
-  function handleDrop(e: React.DragEvent) {
+  function handleDrop(e: DragEvent) {
     e.preventDefault();
     setDragOver(false);
     handleFiles(e.dataTransfer.files);

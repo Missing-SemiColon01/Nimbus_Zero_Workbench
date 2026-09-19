@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
@@ -131,7 +131,7 @@ export function Settings({ theme, onSetTheme, onClearHistory }: SettingsProps) {
   );
 }
 
-function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)] p-5 mb-4">
       <div className="text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase mb-4">{title}</div>
@@ -140,7 +140,7 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   );
 }
 
-function SettingsRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
+function SettingsRow({ label, desc, children }: { label: string; desc: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4">
       <div>
