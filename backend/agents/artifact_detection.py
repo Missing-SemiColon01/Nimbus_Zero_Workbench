@@ -120,3 +120,46 @@ def detect_artifact_intent(
 
     return None
 
+
+_CODE_GENERATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(?:using|with|via)\s+(?:reportlab|python-docx|python-pptx|docx|pptx|openpyxl|matplotlib)\b", re.IGNORECASE),
+    re.compile(r"\b(?:python|code|script)\b.*\b(?:generate|create|build|make|produce|write|draw|export)\b", re.IGNORECASE),
+    re.compile(r"\b(?:generate|create|build|make|produce|write|draw|export)\b.*\b(?:python|code|script)\b", re.IGNORECASE),
+    re.compile(r"\b(?:code-based|programmatic|programmatically|scripted)\b", re.IGNORECASE),
+    re.compile(r"\b(?:reportlab|python-docx|python-pptx)\b", re.IGNORECASE),
+]
+
+
+def select_artifact_generation_mode(
+    user_request: str,
+    explicit_mode: str | None = None,
+) -> str:
+    """Select whether to use 'structured' or 'code' artifact generation.
+
+    Parameters
+    ----------
+    user_request:
+        The raw request string from the user.
+    explicit_mode:
+        Explicit strategy override: 'code', 'structured', or 'auto' (default).
+
+    Returns
+    -------
+    str:
+        'code' or 'structured'.
+    """
+    if explicit_mode == "code":
+        return "code"
+    if explicit_mode == "structured":
+        return "structured"
+
+    if not user_request or not user_request.strip():
+        return "structured"
+
+    # Check if request specifically asks for code, python, or target libraries
+    for pattern in _CODE_GENERATION_PATTERNS:
+        if pattern.search(user_request):
+            return "code"
+
+    return "structured"
+
