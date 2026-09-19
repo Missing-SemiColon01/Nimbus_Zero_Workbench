@@ -160,6 +160,7 @@ async def create_task(payload: TaskCreate, request: Request):
             payload.request,
             task_type=payload.task_type,
             approved_tools=payload.approved_tools,
+            generation_mode=payload.generation_mode,
         )
         return TaskResponse(
             task_id=result.task_id,
