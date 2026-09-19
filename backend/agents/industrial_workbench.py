@@ -244,6 +244,7 @@ class IndustrialWorkbenchAgent:
                 errors=["Could not determine artifact type from the request."],
             )
 
+
         # 2. Verify the target tool is registered and allowed.
         error = self._check_tool_available(intent)
         if error is not None:
@@ -303,7 +304,46 @@ class IndustrialWorkbenchAgent:
                     tool_result=attempted_result,
                 )
 
-            # The model returned content but didn't call the tool — parse and call manually.
+            # The model returned content but didn't call the tool — check for code or parse manually.
+            import re
+            match = re.search(r"```(?:python)?\s*(.*?)\s*```", model_response, re.DOTALL | re.IGNORECASE)
+            
+            if match:
+                code = match.group(1)
+                from backend.sandbox.executor import build_executor, SandboxRequest
+                from backend.core.config import get_settings
+                from pathlib import Path
+                
+                executor = build_executor()
+                req = SandboxRequest(
+                    code=code,
+                    task_id=task_id,
+                    artifacts_dir=str(get_settings().data_dir / "artifacts")
+                )
+                sandbox_res = executor.run(req)
+                
+                if sandbox_res.success and sandbox_res.artifacts:
+                    return ArtifactGenerationResult(
+                        task_id=task_id,
+                        artifact_type=intent.artifact_type,
+                        status="completed",
+                        path=sandbox_res.artifacts[0],
+                        download_url=f"/api/v1/artifacts/{Path(sandbox_res.artifacts[0]).name}/download",
+                        generation_mode="code",
+                        code=code,
+                        artifacts=sandbox_res.artifacts,
+                        errors=[]
+                    )
+                else:
+                    return ArtifactGenerationResult(
+                        task_id=task_id,
+                        artifact_type=intent.artifact_type,
+                        status="failed",
+                        generation_mode="code",
+                        code=code,
+                        errors=[sandbox_res.stderr or "Sandbox execution failed"],
+                    )
+                    
             arguments = self._extract_tool_arguments(model_response, intent.tool_name)
             if arguments is None:
                 tool_result = {
@@ -380,17 +420,65 @@ class IndustrialWorkbenchAgent:
         intent: ArtifactIntent,
         tool_schema: dict[str, Any],
     ) -> str:
-        """Build a prompt that steers the model toward calling the artifact tool."""
-        schema_hint = json.dumps(tool_schema, indent=2) if tool_schema else "{}"
+        """Build a prompt that steers the model toward writing Python code to generate the artifact."""
+        ext_map = {
+            "pptx": ".pptx", "presentation": ".pptx",
+            "pdf": ".pdf",
+            "docx": ".docx", "document": ".docx",
+            "spreadsheet": ".xlsx", "xlsx": ".xlsx"
+        }
+        ext = ext_map.get(intent.artifact_type, f".{intent.artifact_type}")
+        
+        from pathlib import Path
+        
+        skill_file_map = {
+            "pptx": "pptx_skill.md", "presentation": "pptx_skill.md",
+            "docx": "docx_skill.md", "document": "docx_skill.md",
+            "pdf": "pdf_skill.md",
+        }
+        
+        skill_filename = skill_file_map.get(intent.artifact_type)
+        skill_content = ""
+        if skill_filename:
+            skill_path = Path("sandbox/skills") / skill_filename
+            if skill_path.exists():
+                skill_content = skill_path.read_text(encoding="utf-8").strip()
+
+        if not skill_content:
+            if intent.artifact_type in {"pptx", "presentation"}:
+                skill_content = (
+                    "Use `from pptx_helpers import Deck, BODY, split`.\n"
+                    "Initialize: `d = Deck(theme='teal')`\n"
+                    "Add slides: `d.title_slide(...)`, `d.content_slide(...)` with `d.kpis(...)`, `d.cards(...)`, `d.timeline(...)`, `d.chart(...)`.\n"
+                    "Finish with `d.closing_slide(...)` and `d.save('presentation.pptx')`."
+                )
+            elif intent.artifact_type in {"docx", "document"}:
+                skill_content = (
+                    "Use `from docx_helpers import DocxBuilder`.\n"
+                    "Initialize: `doc = DocxBuilder(theme='modern')`\n"
+                    "Add content: `doc.add_title(...)`, `doc.add_heading(...)`, `doc.add_paragraph(...)`, `doc.add_bullet(...)`.\n"
+                    "Finish with `doc.save('document.docx')`."
+                )
+            elif intent.artifact_type == "pdf":
+                skill_content = (
+                    "Use `from pdf_helpers import PdfBuilder`.\n"
+                    "Initialize: `pdf = PdfBuilder(theme='modern')`\n"
+                    "Add content: `pdf.add_title(...)`, `pdf.add_heading(...)`, `pdf.add_paragraph(...)`.\n"
+                    "Finish with `pdf.save('report.pdf')`."
+                )
+            else:
+                skill_content = f"Write a Python script to generate the {intent.artifact_type} deliverable."
+
         return (
-            f"{user_request}\n\n"
-            f"--- Artifact Generation Instructions ---\n"
-            f"You MUST produce a structured JSON tool call for the tool '{intent.tool_name}' "
-            f"to create a {intent.artifact_type} artifact.\n"
-            f"The tool accepts the following JSON schema for its arguments:\n"
-            f"```json\n{schema_hint}\n```\n"
-            f"Call the tool with well-formed arguments derived from the user's request. "
-            f"Do NOT output the artifact content as plain text; use the tool call."
+            f"User Request:\n{user_request}\n\n"
+            f"=== Design & Engineering Skill Reference ===\n"
+            f"{skill_content}\n"
+            f"============================================\n\n"
+            f"Requirements:\n"
+            f"1. Generate a self-contained, executable Python script adhering strictly to the above skill.\n"
+            f"2. Use the pre-installed helper module (`pptx_helpers`, `docx_helpers`, or `pdf_helpers`). Do NOT calculate manual layout coordinates or raw shapes.\n"
+            f"3. Save the generated file with extension '{ext}' in the current working directory.\n"
+            f"4. Output ONLY the Python code in a ```python ... ``` code block. No explanations."
         )
 
     @staticmethod

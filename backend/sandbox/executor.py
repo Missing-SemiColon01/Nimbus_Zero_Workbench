@@ -260,6 +260,19 @@ class DockerSandboxExecutor:
         except Exception:
             pass
 
+        # Copy sandbox helpers (pptx_helpers, docx_helpers, pdf_helpers) into workspace
+        # so code executed inside or outside containers can cleanly import them
+        import shutil
+        sandbox_dir = Path("sandbox")
+        if sandbox_dir.exists():
+            for helper_file in sandbox_dir.glob("*_helpers.py"):
+                dest = workspace / helper_file.name
+                shutil.copy2(helper_file, dest)
+                try:
+                    dest.chmod(0o666)
+                except Exception:
+                    pass
+
         if request.test_code:
             test_dir = workspace / "tests"
             test_dir.mkdir(exist_ok=True)
