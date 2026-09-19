@@ -10,7 +10,12 @@ from typing import Any
 
 import yaml
 
-from backend.agents.artifact_detection import ArtifactIntent, detect_artifact_intent
+from backend.agents.artifact_detection import (
+    ArtifactIntent,
+    detect_artifact_intent,
+    select_artifact_generation_mode,
+)
+from backend.artifacts.code_workflow import CodeArtifactWorkflow
 from backend.agents.runtime import AgentRuntime, RuntimeConfig
 from backend.agents.state import AgentState
 from backend.models.contracts import ModelResponse
@@ -212,16 +217,18 @@ class IndustrialWorkbenchAgent:
         *,
         task_type: str | None = None,
         approved_tools: set[str] | None = None,
+        generation_mode: str = "auto",
     ) -> ArtifactGenerationResult:
         """Detect, generate, and produce a downloadable artifact in one call.
 
         Orchestration flow
         ------------------
         1. Detect intent   → identify artifact type and target tool.
-        2. Generate content → ask the model for structured JSON matching the tool schema.
-        3. Extract result   → check if the runtime already called the tool, or parse JSON.
-        4. Execute tool     → call the artifact tool if not already executed.
-        5. Validate result  → verify success and build the typed response.
+        2. Mode selection  → choose structured or code-based generation.
+        3. Execute mode:
+           - code: generate Python script, execute inside Docker sandbox, verify.
+           - structured: ask model for JSON payload matching tool schema, execute tool.
+        4. Validate result → verify success and build the typed response.
 
         Parameters
         ----------
@@ -231,6 +238,8 @@ class IndustrialWorkbenchAgent:
             Optional explicit task type (``"report"``, ``"artifact"``, etc.).
         approved_tools:
             Tool names explicitly pre-approved by a human for this run.
+        generation_mode:
+            'auto' (default), 'structured', or 'code'.
         """
         task_id = str(uuid.uuid4())
 
@@ -244,8 +253,82 @@ class IndustrialWorkbenchAgent:
                 errors=["Could not determine artifact type from the request."],
             )
 
+        # 2. Select generation mode
+        selected_mode = select_artifact_generation_mode(user_request, generation_mode)
+        if selected_mode == "code" and intent.artifact_type in {"pdf", "document", "docx", "presentation", "pptx"}:
+            return await self._generate_code_artifact(
+                user_request=user_request,
+                intent=intent,
+                task_id=task_id,
+                approved_tools=approved_tools,
+            )
 
-        # 2. Verify the target tool is registered and allowed.
+        return await self._generate_structured_artifact(
+            user_request=user_request,
+            intent=intent,
+            task_id=task_id,
+            approved_tools=approved_tools,
+        )
+
+    async def _generate_code_artifact(
+        self,
+        user_request: str,
+        intent: ArtifactIntent,
+        task_id: str,
+        approved_tools: set[str] | None = None,
+    ) -> ArtifactGenerationResult:
+        """Generate artifact by writing Python code and executing inside the Docker sandbox."""
+        workflow = CodeArtifactWorkflow(
+            router=self.runtime.router,
+            providers=self.runtime.providers,
+            tools=self.tools,
+            max_iterations=self.config.max_retries + 1,
+            timeout_seconds=int(self.config.tool_timeout),
+        )
+        code_result = await workflow.run(
+            user_request=user_request,
+            artifact_type=intent.artifact_type,
+            task_id=task_id,
+        )
+
+        artifacts = [code_result.path] if code_result.path else []
+        response_text = ""
+        if code_result.status == "completed":
+            response_text = f"Successfully generated {intent.artifact_type.upper()} artifact via Python sandbox execution."
+        else:
+            response_text = f"Failed to generate {intent.artifact_type.upper()} artifact after {len(code_result.attempts)} attempt(s)."
+
+        return ArtifactGenerationResult(
+            task_id=task_id,
+            artifact_type=intent.artifact_type,
+            status=code_result.status,
+            path=code_result.path,
+            download_url=code_result.download_url,
+            artifact_metadata=code_result.artifact_metadata,
+            errors=code_result.errors,
+            selected_model=code_result.selected_model,
+            provider=code_result.provider,
+            fallback_used=False,
+            attempted_models=code_result.attempted_models,
+            plan=["generate_code", "execute_sandbox", "verify_artifact"],
+            response=response_text,
+            execution_duration=code_result.execution_duration,
+            artifacts=artifacts,
+            tool_results=code_result.tool_results,
+            generation_mode="code",
+            code=code_result.verified_code,
+            attempts=[att.to_dict() for att in code_result.attempts],
+        )
+
+    async def _generate_structured_artifact(
+        self,
+        user_request: str,
+        intent: ArtifactIntent,
+        task_id: str,
+        approved_tools: set[str] | None = None,
+    ) -> ArtifactGenerationResult:
+        """Original structured artifact generation flow using dedicated tool schemas."""
+        # 1. Verify the target tool is registered and allowed.
         error = self._check_tool_available(intent)
         if error is not None:
             return ArtifactGenerationResult(
@@ -255,7 +338,7 @@ class IndustrialWorkbenchAgent:
                 errors=[error],
             )
 
-        # 3. Generate content through the model (may trigger tool calls via runtime).
+        # 2. Generate content through the model (may trigger tool calls via runtime).
         tool_schema = self._tool_parameter_schema(intent.tool_name)
         generation_prompt = self._artifact_generation_prompt(user_request, intent, tool_schema)
 
@@ -282,13 +365,10 @@ class IndustrialWorkbenchAgent:
                 errors=state.errors or (["Model generation failed."] if state.status == "failed" else []),
             )
 
-        # 4. Check if the runtime already executed the artifact tool.
+        # 3. Check if the runtime already executed the artifact tool.
         tool_result = self._find_tool_result(state, intent.tool_name)
 
         if tool_result is None:
-            # If the runtime did attempt this call and it failed (for example,
-            # schema validation or a generator error), retain that evidence
-            # instead of issuing the same side-effecting call a second time.
             attempted_result = next(
                 (
                     result
@@ -384,7 +464,7 @@ class IndustrialWorkbenchAgent:
             else:
                 tool_result = await self._execute_artifact_tool(arguments, intent, task_id)
 
-        # 5. Build the typed response.
+        # 4. Build the typed response.
         return self._build_result_from_state(
             state,
             intent,
