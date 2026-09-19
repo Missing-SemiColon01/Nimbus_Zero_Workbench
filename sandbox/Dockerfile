@@ -10,6 +10,11 @@ RUN pip install --no-cache-dir \
     reportlab \
     matplotlib
 
+COPY pptx_helpers.py /opt/sandbox/pptx_helpers.py
+COPY docx_helpers.py /opt/sandbox/docx_helpers.py
+COPY pdf_helpers.py /opt/sandbox/pdf_helpers.py
+ENV PYTHONPATH=/opt/sandbox
+
 WORKDIR /workspace
 
 RUN useradd --create-home --uid 1000 runner
