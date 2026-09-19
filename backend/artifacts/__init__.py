@@ -11,6 +11,7 @@ from backend.artifacts.contracts import (
     SlideSpec,
     SpreadsheetSpec,
 )
+from backend.artifacts.code_workflow import CodeArtifactAttempt, CodeArtifactResult, CodeArtifactWorkflow
 from backend.artifacts.docx_generator import DocxGenerator
 from backend.artifacts.pptx_generator import PptxGenerator
 from backend.artifacts.pdf_generator import PdfApprovalNoteGenerator
@@ -43,4 +44,7 @@ __all__ = [
     "PresentationCreateTool",
     "SpreadsheetCreateTool",
     "ArtifactValidateTool",
+    "CodeArtifactAttempt",
+    "CodeArtifactResult",
+    "CodeArtifactWorkflow",
 ]

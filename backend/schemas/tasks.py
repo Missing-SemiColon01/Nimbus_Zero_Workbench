@@ -36,6 +36,10 @@ class TaskCreate(BaseModel):
         default_factory=set,
         description="Tool names explicitly approved by a human for this task run.",
     )
+    generation_mode: Literal["auto", "structured", "code"] = Field(
+        default="auto",
+        description="Artifact generation strategy: 'auto' (detect from request), 'structured', or 'code'.",
+    )
 
     @property
     def required_capabilities(self) -> set[str]:

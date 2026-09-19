@@ -35,6 +35,18 @@ class ArtifactGenerationResult(BaseModel):
         default_factory=list,
         description="Error messages accumulated during orchestration.",
     )
+    generation_mode: str = Field(
+        default="structured",
+        description="Generation strategy used: 'structured' or 'code'.",
+    )
+    code: str | None = Field(
+        default=None,
+        description="Python code generated when code-based artifact generation is used.",
+    )
+    attempts: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Iteration attempts during code generation and sandbox verification.",
+    )
     # Keep artifact runs observable through the same task trace returned by
     # POST /tasks.  Defaults retain the small result contract used by callers
     # that only need artifact metadata.
