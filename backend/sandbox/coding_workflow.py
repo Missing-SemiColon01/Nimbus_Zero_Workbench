@@ -129,7 +129,7 @@ class CodingWorkflow:
 
                 code = extract_python_code(response.content)
                 last_code = code
-                attempt = await self._run_sandbox(len(attempts) + 1, code, test_code, timeout)
+                attempt = await self._run_sandbox(len(attempts) + 1, code, test_code, timeout, task_id=resolved_task_id)
                 attempts.append(attempt)
                 if attempt.test_passed:
                     return CodingWorkflowResult(
@@ -156,7 +156,7 @@ class CodingWorkflow:
             verified_code=last_code,
         )
 
-    async def _run_sandbox(self, attempt: int, code: str, test_code: str, timeout_seconds: int) -> CodingAttempt:
+    async def _run_sandbox(self, attempt: int, code: str, test_code: str, timeout_seconds: int, task_id: str | None = None) -> CodingAttempt:
         tool = self.tools.get("sandbox.execute")
         result = await tool.execute(
             {
@@ -165,7 +165,7 @@ class CodingWorkflow:
                 "language": "python",
                 "timeout_seconds": timeout_seconds,
             },
-            context={},
+            context={"task_id": task_id} if task_id else {},
         )
         output = result.output if isinstance(result.output, dict) else {}
         return CodingAttempt(

@@ -35,4 +35,17 @@ class ArtifactGenerationResult(BaseModel):
         default_factory=list,
         description="Error messages accumulated during orchestration.",
     )
-
+    # Keep artifact runs observable through the same task trace returned by
+    # POST /tasks.  Defaults retain the small result contract used by callers
+    # that only need artifact metadata.
+    selected_model: str | None = None
+    provider: str | None = None
+    fallback_used: bool = False
+    attempted_models: list[str] = Field(default_factory=list)
+    plan: list[str] = Field(default_factory=list)
+    response: str = ""
+    execution_duration: float | None = None
+    artifacts: list[str] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    approval_required: bool = False
+    approval_requests: list[dict[str, Any]] = Field(default_factory=list)

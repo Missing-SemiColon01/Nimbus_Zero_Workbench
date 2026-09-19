@@ -91,6 +91,36 @@ class DocumentCreateProvider(ModelProvider):
         return ModelResponse(content="Approval note created.", model_id=model.id)
 
 
+class PdfCreateProvider(ModelProvider):
+    """Return one PDF call, then finish after receiving the tool result."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return ModelResponse(
+                content="",
+                model_id=model.id,
+                tool_calls=[
+                    ToolCall(
+                        name="pdf.create",
+                        arguments={
+                            "title": "Valve Inspection Approval",
+                            "subject": "SV-402 annual inspection",
+                            "purpose": "Record the annual safety inspection outcome.",
+                            "findings": ["Pressure test passed at 135 PSI."],
+                            "recommendation": "Approve continued operation.",
+                            "requested_approval": "Plant Operations Manager approval.",
+                        },
+                        id="create-pdf-1",
+                    )
+                ],
+            )
+        return ModelResponse(content="PDF approval note created.", model_id=model.id)
+
+
 class ArtifactAgent:
     def __init__(self, artifact_path: Path):
         self.artifact_path = artifact_path
@@ -384,3 +414,71 @@ async def test_create_task_returns_generated_artifact_download_metadata(tmp_path
     assert generated["download_url"] == "/api/v1/artifacts/inspection-review.pptx/download"
     assert generated["preview_url"] == "/api/v1/artifacts/previews/inspection-review-page-1.png"
     assert generated["modified_at"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_orchestrates_an_approved_pdf_and_returns_the_real_file(tmp_path: Path):
+    provider = PdfCreateProvider()
+    async with app.router.lifespan_context(app):
+        app.state.settings.data_dir = tmp_path
+        artifact_dir = tmp_path / "artifacts"
+        for tool in app.state.tools._tools.values():
+            generator = getattr(tool, "generator", None)
+            if generator is not None and hasattr(generator, "output_dir"):
+                generator.output_dir = artifact_dir
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={
+                    "request": "Create a PDF report for the SV-402 valve inspection.",
+                    "task_type": "artifact",
+                    "approved_tools": ["pdf.create"],
+                },
+            )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["task_id"]
+    assert body["status"] == "completed"
+    assert body["selected_model"] == "reasoning"
+    assert body["plan"] == ["generate_response"]
+    assert body["errors"] == []
+    assert body["tool_results"][0]["tool"] == "pdf.create"
+    assert body["tool_results"][0]["success"] is True
+    assert len(body["artifacts"]) == len(body["generated_artifacts"]) == 1
+    pdf_path = Path(body["artifacts"][0])
+    assert pdf_path.is_file()
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+    assert body["generated_artifacts"][0]["file_type"] == "pdf"
+    assert body["generated_artifacts"][0]["download_url"].endswith("/download")
+
+
+@pytest.mark.asyncio
+async def test_create_task_keeps_pdf_creation_behind_explicit_approval(tmp_path: Path):
+    provider = PdfCreateProvider()
+    async with app.router.lifespan_context(app):
+        app.state.settings.data_dir = tmp_path
+        artifact_dir = tmp_path / "artifacts"
+        for tool in app.state.tools._tools.values():
+            generator = getattr(tool, "generator", None)
+            if generator is not None and hasattr(generator, "output_dir"):
+                generator.output_dir = artifact_dir
+        app.state.runtime.providers.register("ollama", provider)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/tasks",
+                json={
+                    "request": "Create a PDF report for the SV-402 valve inspection.",
+                    "task_type": "artifact",
+                },
+            )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "awaiting_approval"
+    assert body["approval_required"] is True
+    assert body["approval_requests"][0]["tool"] == "pdf.create"
+    assert body["tool_results"][0]["success"] is False
+    assert body["artifacts"] == []
+    assert not artifact_dir.exists() or not list(artifact_dir.glob("*.pdf"))
