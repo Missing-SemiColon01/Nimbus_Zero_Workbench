@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,9 @@ class SandboxRequest:
     language: str = "python"
     timeout_seconds: int = 30
     entry_point: str = "solution.py"
+    task_id: str | None = None
+    workspace_dir: str | None = None
+    artifacts_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,8 @@ class SandboxResult:
     test_passed: bool
     timed_out: bool = False
     error: str | None = None
+    artifacts: list[str] = field(default_factory=list)
+    generated_files: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -44,4 +50,6 @@ class SandboxResult:
         if self.error:
             parts.append(f"error={self.error}")
         parts.append(f"test_passed={self.test_passed}")
+        if self.artifacts:
+            parts.append(f"generated_artifacts={len(self.artifacts)}")
         return "\n".join(parts)

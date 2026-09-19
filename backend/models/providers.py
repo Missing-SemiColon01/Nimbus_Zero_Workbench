@@ -6,6 +6,7 @@ It never needs to know which HTTP API, SDK, or process a runtime uses.
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+import json
 from typing import Any
 
 import httpx
@@ -130,6 +131,10 @@ class OllamaProvider(ModelProvider):
                     call_id = tc.get("id")
                     if isinstance(name, str) and name.strip():
                         tool_calls.append(ToolCall(name=name.strip(), arguments=args if isinstance(args, dict) else {}, id=call_id))
+
+        if not content.strip() and tool_calls:
+            call_summaries = [f"{tc.name}({json.dumps(tc.arguments)})" for tc in tool_calls]
+            content = f"Tool calls requested: {', '.join(call_summaries)}"
 
         return ModelResponse(
             content=content,

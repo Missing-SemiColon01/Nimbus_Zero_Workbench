@@ -98,7 +98,8 @@ def build_tool_registry(
             mem_limit=cfg.sandbox_mem_limit,
             cpu_quota=cfg.sandbox_cpu_quota,
             timeout_seconds=cfg.sandbox_timeout_seconds,
-        )
+        ),
+        artifacts_dir=artifact_dir,
     )
     registry.register(sandbox_tool)
     logger.info("Registered tool: '%s'", sandbox_tool.name)

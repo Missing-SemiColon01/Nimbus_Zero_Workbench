@@ -414,13 +414,14 @@ class AgentRuntime:
                 errors.append(str(error))
                 continue
 
+            final_content = response.content.strip() or "Task execution completed."
             return {
                 "selected_model": model.id,
                 "provider": model.runtime,
                 "fallback_used": len(attempted_models) > 1,
                 "attempted_models": attempted_models,
-                "messages": [*state["messages"], response.content],
-                "final_response": response.content,
+                "messages": [*state["messages"], final_content],
+                "final_response": final_content,
                 "errors": errors,
                 "model_response": response,
                 "tool_results": tool_results,
