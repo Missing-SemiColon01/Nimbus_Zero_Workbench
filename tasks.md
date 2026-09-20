@@ -73,7 +73,7 @@ The goals are:
   - Fix runtime crash bug on line 415: change `model_response` to `model_response.content` in regex search
   - Ensure skill files (`sandbox/skills/pptx_skill.md`, `sandbox/skills/docx_skill.md`, `sandbox/skills/pdf_skill.md`) and helpers are correctly resolved
 
-- [ ] **Task 2.3: Enhance `backend/artifacts/code_workflow.py`**
+- [x] **Task 2.3: Enhance `backend/artifacts/code_workflow.py`**
   - Ensure robust self-contained script prompts for all 4 deliverable formats (`pptx`, `docx`, `pdf`, `xlsx`)
   - Ensure error feedback and tracebacks are fed back into repair attempts for up to `max_iterations`
   - Update `OfficeArtifactValidator` to include Word tables (`document.tables`) in content checks so valid documents don't fail validation

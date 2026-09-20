@@ -423,3 +423,84 @@ class TestArtifactGenerationResult:
         data = r.model_dump(mode="json")
         restored = ArtifactGenerationResult.model_validate(data)
         assert restored == r
+
+
+# ===========================================================================
+# 5. Multi-attempt repair loop tests
+# ===========================================================================
+
+
+class MultiAttemptRepairProvider(ModelProvider):
+    """Provider that yields bad code on attempt 1 and working code on attempt 2."""
+
+    def __init__(self, bad_code: str, good_code: str):
+        self.bad_code = bad_code
+        self.good_code = good_code
+        self.prompts: list[str] = []
+
+    async def generate(self, model: ModelDefinition, request: Any) -> ModelResponse:
+        self.prompts.append(request.prompt)
+        if len(self.prompts) == 1:
+            return ModelResponse(
+                content=f"```python\n{self.bad_code}\n```",
+                model_id=model.id,
+            )
+        return ModelResponse(
+            content=f"```python\n{self.good_code}\n```",
+            model_id=model.id,
+        )
+
+
+class TestCodeArtifactWorkflowRepair:
+    """Verify that CodeArtifactWorkflow feeds errors and validation back into repair attempts."""
+
+    def test_workflow_repairs_after_runtime_error(self, tmp_path: Path):
+        bad_code = "raise ValueError('Initial code buggy')"
+        good_code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.add_heading('Repaired Report', 0)\n"
+            "doc.add_paragraph('Successfully generated on attempt 2.')\n"
+            "doc.save('report.docx')\n"
+        )
+        provider = MultiAttemptRepairProvider(bad_code=bad_code, good_code=good_code)
+        agent = _build_agent(tmp_path, provider)
+
+        result = asyncio.run(
+            agent.generate_artifact("Generate an audit report", task_type="report")
+        )
+
+        assert result.status == "completed"
+        assert result.artifact_type == "docx"
+        assert Path(result.path).exists()
+        assert len(provider.prompts) == 2
+        # Verify the repair prompt received the error traceback / feedback
+        assert "PREVIOUS ATTEMPT FAILED" in provider.prompts[1]
+        assert "Initial code buggy" in provider.prompts[1]
+        assert "REPAIR INSTRUCTIONS" in provider.prompts[1]
+
+    def test_workflow_repairs_after_validation_failure(self, tmp_path: Path):
+        """Attempt 1 creates an empty document; attempt 2 adds required content."""
+        empty_code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.save('report.docx')\n"
+        )
+        good_code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.add_paragraph('Non-empty content is now provided.')\n"
+            "doc.save('report.docx')\n"
+        )
+        provider = MultiAttemptRepairProvider(bad_code=empty_code, good_code=good_code)
+        agent = _build_agent(tmp_path, provider)
+
+        result = asyncio.run(
+            agent.generate_artifact("Generate a document", task_type="report")
+        )
+
+        assert result.status == "completed"
+        assert len(provider.prompts) == 2
+        assert "PREVIOUS ATTEMPT FAILED" in provider.prompts[1]
+        assert "Artifact has no readable content" in provider.prompts[1]
+

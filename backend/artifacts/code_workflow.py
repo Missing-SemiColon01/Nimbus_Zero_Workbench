@@ -553,6 +553,40 @@ class CodeArtifactWorkflow:
                 f"pdf.save('{filename}')\n"
                 "```\n"
             )
+        elif artifact_type in {"xlsx", "spreadsheet"}:
+            template_example = (
+                "Example Pattern to follow:\n"
+                "```python\n"
+                "import openpyxl\n"
+                "from openpyxl.styles import Font, PatternFill, Alignment, Border, Side\n\n"
+                "wb = openpyxl.Workbook()\n"
+                "ws = wb.active\n"
+                "ws.title = 'Overview'\n"
+                "# Style header row\n"
+                "header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')\n"
+                "header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')\n"
+                "headers = ['Item', 'Category', 'Quantity', 'Status']\n"
+                "for col_num, header in enumerate(headers, 1):\n"
+                "    cell = ws.cell(row=1, column=col_num, value=header)\n"
+                "    cell.font = header_font\n"
+                "    cell.fill = header_fill\n"
+                "    cell.alignment = Alignment(horizontal='center')\n\n"
+                "# Add data rows\n"
+                "data = [\n"
+                "    ['Alpha Unit', 'Equipment', 12, 'Operational'],\n"
+                "    ['Beta Sensor', 'Telemetry', 48, 'Active'],\n"
+                "]\n"
+                "for r_idx, row in enumerate(data, start=2):\n"
+                "    for c_idx, val in enumerate(row, start=1):\n"
+                "        ws.cell(row=r_idx, column=c_idx, value=val)\n\n"
+                "# Adjust column widths\n"
+                "for col in ws.columns:\n"
+                "    max_len = max(len(str(cell.value or '')) for cell in col)\n"
+                "    col_letter = openpyxl.utils.get_column_letter(col[0].column)\n"
+                "    ws.column_dimensions[col_letter].width = max(max_len + 3, 12)\n\n"
+                f"wb.save('{filename}')\n"
+                "```\n"
+            )
 
         if skill_content:
             guidance = (
@@ -565,7 +599,8 @@ class CodeArtifactWorkflow:
             )
         elif artifact_type == "pdf":
             guidance = (
-                "Use 'reportlab' to create a well-designed PDF document.\n"
+                f"{template_example}\n"
+                "Use 'reportlab' or 'pdf_helpers' to create a well-designed PDF document.\n"
                 "- Recommended imports: SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle from reportlab.platypus, "
                 "getSampleStyleSheet, ParagraphStyle from reportlab.lib.styles, and colors from reportlab.lib.\n"
                 f"- Build and save the document to '{filename}' (or any '{expected_ext}' in the current working directory).\n"
@@ -574,19 +609,22 @@ class CodeArtifactWorkflow:
             )
         elif artifact_type in {"docx", "document"}:
             guidance = (
-                "Use 'python-docx' (import docx / from docx import Document) to create a professional Word document.\n"
+                f"{template_example}\n"
+                "Use 'docx_helpers' or 'python-docx' (import docx / from docx import Document) to create a professional Word document.\n"
                 f"- Save the document to '{filename}' (or any '{expected_ext}' in the current working directory).\n"
                 "- Include a document title, structured headings (Heading 1, Heading 2), formatted paragraphs, and tables.\n"
             )
         elif artifact_type in {"pptx", "presentation"}:
             guidance = (
-                "Use 'python-pptx' (from pptx import Presentation; from pptx.util import Inches, Pt) to create an editable presentation.\n"
+                f"{template_example}\n"
+                "Use 'pptx_helpers' or 'python-pptx' (from pptx import Presentation; from pptx.util import Inches, Pt) to create an editable presentation.\n"
                 f"- Save the presentation to '{filename}' (or any '{expected_ext}' in the current working directory).\n"
                 "- Create multiple distinct slides (e.g. title slide, overview, key points/findings, conclusion/next steps).\n"
                 "- Add slide titles, bullet points, text boxes, and tables where appropriate.\n"
             )
         elif artifact_type in {"xlsx", "spreadsheet"}:
             guidance = (
+                f"{template_example}\n"
                 "Use 'openpyxl' (from openpyxl import Workbook; from openpyxl.styles import Font, PatternFill, Alignment, Border, Side) to create a styled Excel spreadsheet.\n"
                 f"- Save the workbook to '{filename}' (or any '{expected_ext}' in the current working directory).\n"
                 "- Create structured worksheets (e.g. Executive Summary, Data, Calculations).\n"
@@ -600,8 +638,12 @@ class CodeArtifactWorkflow:
         if feedback:
             repair_block = (
                 f"\n--- PREVIOUS ATTEMPT FAILED ---\n"
-                f"{feedback}\n"
-                f"Please fix all errors and return the corrected Python script.\n"
+                f"{feedback}\n\n"
+                f"REPAIR INSTRUCTIONS:\n"
+                f"1. Carefully inspect the Python traceback, error message, and validation findings above.\n"
+                f"2. Fix all syntax errors, missing imports, bad method calls, or logic bugs in the script.\n"
+                f"3. Ensure the script completes with exit code 0 and successfully writes '{filename}'.\n"
+                f"4. Output the complete, corrected executable Python script in a ```python ... ``` code block.\n"
                 f"-------------------------------\n\n"
             )
 
@@ -622,17 +664,18 @@ class CodeArtifactWorkflow:
     def _build_feedback(attempt: CodeArtifactAttempt) -> str:
         """Format execution feedback to steer the model toward repair."""
         parts = [
-            f"exit_code={attempt.exit_code}",
-            f"timed_out={attempt.timed_out}",
+            f"Attempt {attempt.attempt} Result: exit_code={attempt.exit_code}, timed_out={attempt.timed_out}",
         ]
+        if attempt.code.strip():
+            parts.append(f"Failed Code (Attempt {attempt.attempt}):\n```python\n{attempt.code.strip()}\n```")
         if attempt.stderr.strip():
-            parts.append(f"stderr:\n{attempt.stderr.strip()[-3000:]}")
+            parts.append(f"Python Traceback / Stderr:\n{attempt.stderr.strip()[-3000:]}")
         if attempt.stdout.strip():
-            parts.append(f"stdout:\n{attempt.stdout.strip()[-1000:]}")
+            parts.append(f"Execution Stdout:\n{attempt.stdout.strip()[-1000:]}")
         if attempt.findings:
             parts.append("Validation findings:\n- " + "\n- ".join(attempt.findings))
         if attempt.error:
-            parts.append(f"Error: {attempt.error}")
+            parts.append(f"Execution Error: {attempt.error}")
         return "\n".join(parts)
 
     @staticmethod
