@@ -86,7 +86,7 @@ class TestIngestAPI:
             response = client.post(
                 "/api/v1/ingest",
                 json={
-                     "file_path": str(pdf_path),,  # Relative to uploads dir
+                    "file_path": "test_doc.pdf",  # Relative to uploads dir
                     "document_id": "test_doc_01",
                     "chunk_size": 200,
                 },
