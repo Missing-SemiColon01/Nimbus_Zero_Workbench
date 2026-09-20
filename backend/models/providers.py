@@ -5,13 +5,20 @@ It never needs to know which HTTP API, SDK, or process a runtime uses.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 import json
 from typing import Any
 
 import httpx
 
-from backend.models.contracts import ModelDefinition, ModelRequest, ModelResponse, ToolCall
+from backend.models.contracts import (
+    ChatMessage,
+    ModelDefinition,
+    ModelRequest,
+    ModelResponse,
+    ToolCall,
+    normalize_messages,
+)
 
 
 class ModelProvider(ABC):
@@ -20,17 +27,34 @@ class ModelProvider(ABC):
     @abstractmethod
     async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse: ...
 
+    async def stream_generate(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> AsyncIterator[str]:
+        """Stream content with a fallback for providers without native streaming."""
+        response = await self.generate(model, request)
+        if response.content:
+            yield response.content
+
+    async def stream_generate_response(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> ModelResponse:
+        """Collect a streaming response while preserving its final metadata."""
+        content_parts: list[str] = []
+        async for chunk in self.stream_generate(model, request):
+            content_parts.append(chunk)
+        return ModelResponse(content="".join(content_parts), model_id=model.id)
+
 
 class ProviderError(RuntimeError):
     """Base error for failures at the model-provider boundary."""
 
 
 class ProviderRequestError(ProviderError):
-    """The provider rejected a malformed or invalid generation request.
-
-    Retrying another model cannot make an invalid request valid, so callers
-    must surface this error rather than treating it as an availability issue.
-    """
+    """Raised when the provider rejects a malformed or invalid request."""
 
 
 class ProviderNotFoundError(ProviderError):
@@ -38,12 +62,7 @@ class ProviderNotFoundError(ProviderError):
 
 
 class ModelProviderRegistry:
-    """Runtime-to-provider mapping owned by the model gateway.
-
-    The registry deliberately accepts the abstract ``ModelProvider`` type, so
-    adding vLLM, llama.cpp, or another local engine is an adapter/configuration
-    change and does not affect agents or routing.
-    """
+    """Runtime-to-provider mapping owned by the model gateway."""
 
     def __init__(self, providers: Mapping[str, ModelProvider] | None = None):
         self._providers: dict[str, ModelProvider] = {}
@@ -66,41 +85,118 @@ class ModelProviderRegistry:
         """Dispatch a request using the provider selected by model configuration."""
         return await self.get(model.runtime).generate(model, request)
 
+    async def stream_generate(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> AsyncIterator[str]:
+        async for chunk in self.get(model.runtime).stream_generate(model, request):
+            yield chunk
+
+    async def stream_generate_response(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> ModelResponse:
+        provider = self.get(model.runtime)
+        collector = getattr(provider, "stream_generate_response", None)
+        if collector is not None:
+            return await collector(model, request)
+        content_parts: list[str] = []
+        async for chunk in provider.stream_generate(model, request):
+            content_parts.append(chunk)
+        return ModelResponse(content="".join(content_parts), model_id=model.id)
+
 
 class OllamaProvider(ModelProvider):
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
-    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
-        messages = []
-        if request.prompt:
-            messages.append({"role": "user", "content": request.prompt})
+    @staticmethod
+    def _format_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_schema.get("name"),
+                    "description": tool_schema.get("description", ""),
+                    "parameters": tool_schema.get("parameters", {}),
+                },
+            }
+            for tool_schema in tools
+        ]
 
+    @staticmethod
+    def _tool_calls_from_data(data: dict[str, Any]) -> list[ToolCall]:
+        message = data.get("message", {})
+        if not isinstance(message, dict):
+            return []
+        raw_tool_calls = message.get("tool_calls", [])
+        tool_calls: list[ToolCall] = []
+        if not isinstance(raw_tool_calls, list):
+            return tool_calls
+        for tool_call in raw_tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function", {})
+            if not isinstance(function, dict):
+                function = {}
+            name = function.get("name") or tool_call.get("name")
+            arguments = function.get("arguments") or tool_call.get("arguments") or {}
+            call_id = tool_call.get("id")
+            if isinstance(name, str) and name.strip():
+                tool_calls.append(
+                    ToolCall(
+                        name=name.strip(),
+                        arguments=arguments if isinstance(arguments, dict) else {},
+                        id=call_id if isinstance(call_id, str) else None,
+                    )
+                )
+        return tool_calls
+
+    @staticmethod
+    def _response_from_data(model: ModelDefinition, data: Any) -> ModelResponse:
+        if not isinstance(data, dict):
+            raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'")
+        message = data.get("message", {})
+        if not isinstance(message, dict):
+            raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'")
+        content = message.get("content", "")
+        if not isinstance(content, str):
+            raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'")
+        tool_calls = OllamaProvider._tool_calls_from_data(data)
+        if not content.strip() and tool_calls:
+            call_summaries = [f"{call.name}({json.dumps(call.arguments)})" for call in tool_calls]
+            content = f"Tool calls requested: {', '.join(call_summaries)}"
+        return ModelResponse(
+            content=content,
+            model_id=model.id,
+            raw=data,
+            tool_calls=tool_calls,
+        )
+
+    def _build_payload(self, model: ModelDefinition, request: ModelRequest, *, stream: bool) -> dict[str, Any]:
+        messages = normalize_messages(request.messages, request.prompt, request.images)
         payload: dict[str, Any] = {
             "model": model.model,
-            "messages": messages,
-            "stream": False,
+            "messages": [
+                {
+                    "role": message.role,
+                    "content": message.content,
+                    **({"images": message.images} if message.images else {}),
+                }
+                for message in messages
+            ],
+            "stream": stream,
         }
-        if request.images:
-            # Attach images to the last user message if present
-            if messages:
-                messages[-1]["images"] = request.images
-            else:
-                messages.append({"role": "user", "content": "", "images": request.images})
-
+        if request.documents:
+            payload["documents"] = request.documents
         if request.tools:
-            formatted_tools = []
-            for tool_schema in request.tools:
-                formatted_tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool_schema.get("name"),
-                        "description": tool_schema.get("description", ""),
-                        "parameters": tool_schema.get("parameters", {}),
-                    },
-                })
-            payload["tools"] = formatted_tools
+            payload["tools"] = self._format_tools(request.tools)
+        return payload
 
+    async def generate(self, model: ModelDefinition, request: ModelRequest) -> ModelResponse:
+        payload = self._build_payload(model, request, stream=False)
         async with httpx.AsyncClient(timeout=120) as client:
             try:
                 response = await client.post(f"{self.base_url}/api/chat", json=payload)
@@ -116,29 +212,71 @@ class OllamaProvider(ModelProvider):
                 raise ProviderError(f"Ollama generation failed for model '{model.id}'") from error
             except ValueError as error:
                 raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'") from error
+        return self._response_from_data(model, data)
 
-        msg = data.get("message", {})
-        content = msg.get("content", "")
-        raw_tool_calls = msg.get("tool_calls", [])
-        tool_calls = []
+    async def _stream_response(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        payload = self._build_payload(model, request, stream=True)
+        async with httpx.AsyncClient(timeout=120) as client:
+            try:
+                async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError as error:
+                            raise ProviderError(
+                                f"Ollama returned an invalid stream response for model '{model.id}'"
+                            ) from error
+                        if not isinstance(data, dict) or not isinstance(data.get("message"), dict):
+                            raise ProviderError(
+                                f"Ollama returned an invalid stream response for model '{model.id}'"
+                            )
+                        content = data["message"].get("content", "")
+                        if not isinstance(content, str):
+                            raise ProviderError(
+                                f"Ollama returned an invalid stream response for model '{model.id}'"
+                            )
+                        if content:
+                            yield content, data
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code in {400, 422}:
+                    raise ProviderRequestError(
+                        f"Ollama rejected generation request for model '{model.id}'"
+                    ) from error
+                raise ProviderError(f"Ollama generation failed for model '{model.id}'") from error
+            except httpx.HTTPError as error:
+                raise ProviderError(f"Ollama generation failed for model '{model.id}'") from error
 
-        if isinstance(raw_tool_calls, list):
-            for tc in raw_tool_calls:
-                if isinstance(tc, dict):
-                    fn = tc.get("function", {})
-                    name = fn.get("name") or tc.get("name")
-                    args = fn.get("arguments") or tc.get("arguments") or {}
-                    call_id = tc.get("id")
-                    if isinstance(name, str) and name.strip():
-                        tool_calls.append(ToolCall(name=name.strip(), arguments=args if isinstance(args, dict) else {}, id=call_id))
+    async def stream_generate(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> AsyncIterator[str]:
+        async for content, _ in self._stream_response(model, request):
+            yield content
 
-        if not content.strip() and tool_calls:
-            call_summaries = [f"{tc.name}({json.dumps(tc.arguments)})" for tc in tool_calls]
-            content = f"Tool calls requested: {', '.join(call_summaries)}"
-
-        return ModelResponse(
-            content=content,
-            model_id=model.id,
-            raw=data,
-            tool_calls=tool_calls,
-        )
+    async def stream_generate_response(
+        self,
+        model: ModelDefinition,
+        request: ModelRequest,
+    ) -> ModelResponse:
+        content_parts: list[str] = []
+        final_data: dict[str, Any] = {}
+        async for content, data in self._stream_response(model, request):
+            content_parts.append(content)
+            final_data = data
+        response = self._response_from_data(model, final_data or {"message": {}})
+        if not response.content and response.tool_calls:
+            response = ModelResponse(
+                content=f"Tool calls requested: {', '.join(f'{call.name}({json.dumps(call.arguments)})' for call in response.tool_calls)}",
+                model_id=model.id,
+                raw=response.raw,
+                tool_calls=response.tool_calls,
+            )
+        return response

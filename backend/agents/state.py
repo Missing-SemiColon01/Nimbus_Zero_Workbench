@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.models.contracts import ChatMessage
+
 
 
 class StateValidationError(ValueError):
@@ -77,11 +79,17 @@ def validate_state(
         raise StateValidationError("Field 'user_prompt' must be a non-empty string")
 
     if not isinstance(messages, list) or len(messages) == 0:
-        raise StateValidationError("Field 'messages' must be a non-empty list of strings")
+        raise StateValidationError("Field 'messages' must be a non-empty list")
 
     for i, msg in enumerate(messages):
-        if not isinstance(msg, str) or not msg.strip():
-            raise StateValidationError(f"Field 'messages[{i}]' must be a non-empty string")
+        if isinstance(msg, str):
+            if not msg.strip():
+                raise StateValidationError(f"Field 'messages[{i}]' must be non-empty")
+        elif hasattr(msg, 'content') and hasattr(msg, 'role'):
+            if not msg.content or not msg.content.strip():
+                raise StateValidationError(f"Field 'messages[{i}].content' must be non-empty")
+        else:
+            raise StateValidationError(f"Field 'messages[{i}]' must be a string or ChatMessage")
 
     for field_name, values in attachments.items():
         if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
@@ -104,7 +112,7 @@ class AgentState:
     user_prompt: str | None = None
     plan: list[str] = field(default_factory=list)
     current_step: int = 0
-    messages: list[str] = field(default_factory=list)
+    messages: list[ChatMessage] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     documents: list[str] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
