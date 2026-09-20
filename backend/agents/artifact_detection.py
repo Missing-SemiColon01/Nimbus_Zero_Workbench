@@ -1,4 +1,4 @@
-"""Classify user requests that need artifact generation and route to the correct tool."""
+"""Classify user requests that require deliverable artifact generation (e.g. pptx, xlsx, pdf, docx)."""
 
 from __future__ import annotations
 
@@ -8,74 +8,103 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ArtifactIntent:
-    """Detected artifact-generation intent with the target tool name."""
+    """Detected artifact-generation intent."""
 
     artifact_type: str
-    tool_name: str
+    tool_name: str | None = None
 
 
-# Ordered list of (compiled regex, artifact_type, tool_name).
-# Patterns are tried in order; the first match wins.  More specific patterns
-# (e.g. "approval note") must appear before broad ones (e.g. "report").
-_ARTIFACT_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
-    # Presentation / slides
+# Explicit task_type mapping to canonical deliverable formats.
+_TASK_TYPE_MAP: dict[str, str] = {
+    "presentation": "pptx",
+    "pptx": "pptx",
+    "slides": "pptx",
+    "spreadsheet": "xlsx",
+    "xlsx": "xlsx",
+    "excel": "xlsx",
+    "pdf": "pdf",
+    "docx": "docx",
+    "document": "docx",
+    "report": "docx",
+    "artifact": "docx",
+}
+
+# Ordered list of (compiled regex, canonical artifact_type).
+# Patterns are tried in order; the first match wins.
+# Specific formats (pptx, xlsx, pdf) must appear before broad document/report patterns.
+_ARTIFACT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # 1. Presentation / slides (pptx)
     (
         re.compile(
-            r"\b(?:create|generate|build|prepare|make|produce|draft)\b.*"
-            r"\b(?:presentation|slide[s]?|deck|pptx)\b",
+            r"\b(?:create|generate|build|prepare|make|produce|draft|design)\b.*"
+            r"\b(?:presentation|slide[s]?|deck|pitch\s*deck|slide\s*deck|powerpoint|pptx)\b",
             re.IGNORECASE,
         ),
-        "presentation",
-        "presentation.create",
+        "pptx",
     ),
-    (
-        re.compile(r"\b(?:presentation|slide[s]?|deck|pptx)\b.*\b(?:for|about|on|regarding)\b", re.IGNORECASE),
-        "presentation",
-        "presentation.create",
-    ),
-    # Spreadsheet / Excel
     (
         re.compile(
-            r"\b(?:create|generate|build|prepare|make|produce|draft)\b.*"
-            r"\b(?:spreadsheet|excel|xlsx|workbook)\b",
+            r"\b(?:presentation|slide[s]?|deck|pitch\s*deck|slide\s*deck|powerpoint|pptx)\b.*"
+            r"\b(?:for|about|on|regarding|explaining|covering|summarizing)\b",
             re.IGNORECASE,
         ),
-        "spreadsheet",
-        "spreadsheet.create",
+        "pptx",
     ),
-    (
-        re.compile(r"\b(?:spreadsheet|excel|xlsx|workbook)\b.*\b(?:for|about|with|containing)\b", re.IGNORECASE),
-        "spreadsheet",
-        "spreadsheet.create",
-    ),
-    # PDF (must precede generic document/report patterns)
+    # 2. Spreadsheet / Excel (xlsx)
     (
         re.compile(
-            r"\b(?:create|generate|build|prepare|make|produce|draft)\b.*\b(?:pdf)\b",
+            r"\b(?:create|generate|build|prepare|make|produce|draft|design)\b.*"
+            r"\b(?:spreadsheet|excel|xlsx|workbook|financial\s*model|budget\s*sheet|balance\s*sheet|data\s*sheet)\b",
+            re.IGNORECASE,
+        ),
+        "xlsx",
+    ),
+    (
+        re.compile(
+            r"\b(?:spreadsheet|excel|xlsx|workbook|financial\s*model|budget\s*sheet|balance\s*sheet)\b.*"
+            r"\b(?:for|about|with|containing|on|tracking|calculating)\b",
+            re.IGNORECASE,
+        ),
+        "xlsx",
+    ),
+    # 3. PDF (pdf) - must precede generic document/report patterns
+    (
+        re.compile(
+            r"\b(?:create|generate|build|prepare|make|produce|draft|export)\b.*\b(?:pdf)\b",
             re.IGNORECASE,
         ),
         "pdf",
-        "pdf.create",
     ),
     (
-        re.compile(r"\b(?:pdf)\s+(?:report|document|note|file)\b", re.IGNORECASE),
+        re.compile(
+            r"\b(?:pdf)\s+(?:report|document|note|file|memo|summary|whitepaper|invoice|brief)\b",
+            re.IGNORECASE,
+        ),
         "pdf",
-        "pdf.create",
     ),
-    # Document / report / approval note (broadest — last)
+    (
+        re.compile(
+            r"\b(?:pdf)\b.*\b(?:for|about|on|regarding|summarizing|covering)\b",
+            re.IGNORECASE,
+        ),
+        "pdf",
+    ),
+    # 4. Document / report / approval note / memo (docx) - broadest, evaluated last
     (
         re.compile(
             r"\b(?:create|generate|build|prepare|make|produce|draft|write)\b.*"
-            r"\b(?:report|document|approval\s+note|docx|memo|summary\s+report)\b",
+            r"\b(?:report|document|approval\s+note|docx|memo|summary\s+report|brief|proposal|whitepaper|minutes|guideline[s]?)\b",
             re.IGNORECASE,
         ),
-        "document",
-        "document.create",
+        "docx",
     ),
     (
-        re.compile(r"\b(?:approval\s+note|report|document|docx)\b.*\b(?:for|about|on|regarding)\b", re.IGNORECASE),
-        "document",
-        "document.create",
+        re.compile(
+            r"\b(?:approval\s+note|report|document|docx|memo|brief|proposal|whitepaper)\b.*"
+            r"\b(?:for|about|on|regarding|covering|summarizing)\b",
+            re.IGNORECASE,
+        ),
+        "docx",
     ),
 ]
 
@@ -88,11 +117,14 @@ def detect_artifact_intent(
 
     Detection strategy
     ------------------
-    1. **Explicit task_type**: ``"report"`` or ``"artifact"`` immediately qualify as
-       an artifact request; the text is then scanned for a more specific tool.
-       If no specific pattern matches, the default is ``document.create``.
-    2. **Keyword heuristics**: the request text is matched against ordered regex
-       patterns covering presentations, spreadsheets, PDFs, and documents.
+    1. **Explicit task_type**: Recognized task types (e.g. ``"report"``, ``"artifact"``,
+       ``"presentation"``) qualify as deliverable requests. The request text is still
+       scanned for a more specific format match; if none matches, the mapped canonical
+       format (e.g. ``"docx"`` for ``"report"``) is used.
+    2. **Keyword heuristics**: The request text is matched against ordered regex patterns
+       covering presentations (pptx), spreadsheets (xlsx), PDFs (pdf), and documents (docx).
+       This general-purpose detection supports any domain (business, technology, operations,
+       finance, academic, etc.).
 
     Parameters
     ----------
@@ -104,62 +136,18 @@ def detect_artifact_intent(
     if not user_request or not user_request.strip():
         return None
 
-    # Fast path: explicit task_type forces artifact generation.
-    if task_type in {"report", "artifact"}:
-        # Still scan text for a more specific artifact type.
-        for pattern, artifact_type, tool_name in _ARTIFACT_PATTERNS:
+    # Check explicit task_type
+    normalized_task_type = task_type.lower().strip() if task_type else None
+    if normalized_task_type in _TASK_TYPE_MAP:
+        # Still scan text for a more specific format if user request mentions one
+        for pattern, artifact_type in _ARTIFACT_PATTERNS:
             if pattern.search(user_request):
-                return ArtifactIntent(artifact_type=artifact_type, tool_name=tool_name)
-        # Default to document when no specific format is mentioned.
-        return ArtifactIntent(artifact_type="document", tool_name="document.create")
+                return ArtifactIntent(artifact_type=artifact_type)
+        return ArtifactIntent(artifact_type=_TASK_TYPE_MAP[normalized_task_type])
 
-    # Keyword-based detection on user_request text.
-    for pattern, artifact_type, tool_name in _ARTIFACT_PATTERNS:
+    # Scan request text against ordered patterns
+    for pattern, artifact_type in _ARTIFACT_PATTERNS:
         if pattern.search(user_request):
-            return ArtifactIntent(artifact_type=artifact_type, tool_name=tool_name)
+            return ArtifactIntent(artifact_type=artifact_type)
 
     return None
-
-
-_CODE_GENERATION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:using|with|via)\s+(?:reportlab|python-docx|python-pptx|docx|pptx|openpyxl|matplotlib)\b", re.IGNORECASE),
-    re.compile(r"\b(?:python|code|script)\b.*\b(?:generate|create|build|make|produce|write|draw|export)\b", re.IGNORECASE),
-    re.compile(r"\b(?:generate|create|build|make|produce|write|draw|export)\b.*\b(?:python|code|script)\b", re.IGNORECASE),
-    re.compile(r"\b(?:code-based|programmatic|programmatically|scripted)\b", re.IGNORECASE),
-    re.compile(r"\b(?:reportlab|python-docx|python-pptx)\b", re.IGNORECASE),
-]
-
-
-def select_artifact_generation_mode(
-    user_request: str,
-    explicit_mode: str | None = None,
-) -> str:
-    """Select whether to use 'structured' or 'code' artifact generation.
-
-    Parameters
-    ----------
-    user_request:
-        The raw request string from the user.
-    explicit_mode:
-        Explicit strategy override: 'code', 'structured', or 'auto' (default).
-
-    Returns
-    -------
-    str:
-        'code' or 'structured'.
-    """
-    if explicit_mode == "code":
-        return "code"
-    if explicit_mode == "structured":
-        return "structured"
-
-    if not user_request or not user_request.strip():
-        return "structured"
-
-    # Check if request specifically asks for code, python, or target libraries
-    for pattern in _CODE_GENERATION_PATTERNS:
-        if pattern.search(user_request):
-            return "code"
-
-    return "structured"
-

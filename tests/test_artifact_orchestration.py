@@ -147,76 +147,99 @@ def _build_agent(
 class TestDetectArtifactIntent:
     """Unit tests for the detect_artifact_intent function."""
 
-    def test_report_task_type_defaults_to_document(self):
+    def test_report_task_type_defaults_to_docx(self):
         intent = detect_artifact_intent("summarize the findings", task_type="report")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
-    def test_artifact_task_type_defaults_to_document(self):
+    def test_artifact_task_type_defaults_to_docx(self):
         intent = detect_artifact_intent("summarize the findings", task_type="artifact")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
     def test_report_task_type_with_presentation_keyword(self):
         intent = detect_artifact_intent("create a presentation about safety", task_type="report")
         assert intent is not None
-        assert intent.artifact_type == "presentation"
-        assert intent.tool_name == "presentation.create"
+        assert intent.artifact_type == "pptx"
 
     def test_report_task_type_with_pdf_keyword(self):
         intent = detect_artifact_intent("generate a pdf for the audit", task_type="report")
         assert intent is not None
         assert intent.artifact_type == "pdf"
-        assert intent.tool_name == "pdf.create"
 
     def test_report_task_type_with_spreadsheet_keyword(self):
         intent = detect_artifact_intent("create a spreadsheet with inspection data", task_type="artifact")
         assert intent is not None
-        assert intent.artifact_type == "spreadsheet"
-        assert intent.tool_name == "spreadsheet.create"
+        assert intent.artifact_type == "xlsx"
 
     def test_keyword_document_create(self):
         intent = detect_artifact_intent("Generate a report on the equipment status")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
     def test_keyword_approval_note(self):
         intent = detect_artifact_intent("prepare an approval note for the procurement")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
     def test_keyword_presentation(self):
         intent = detect_artifact_intent("build a presentation for the board meeting")
         assert intent is not None
-        assert intent.artifact_type == "presentation"
-        assert intent.tool_name == "presentation.create"
+        assert intent.artifact_type == "pptx"
 
     def test_keyword_slides(self):
         intent = detect_artifact_intent("create slides about the new safety protocol")
         assert intent is not None
-        assert intent.artifact_type == "presentation"
+        assert intent.artifact_type == "pptx"
 
     def test_keyword_spreadsheet(self):
         intent = detect_artifact_intent("produce an excel workbook with monthly stats")
         assert intent is not None
-        assert intent.artifact_type == "spreadsheet"
-        assert intent.tool_name == "spreadsheet.create"
+        assert intent.artifact_type == "xlsx"
 
     def test_keyword_pdf(self):
         intent = detect_artifact_intent("create a pdf with the inspection summary")
         assert intent is not None
         assert intent.artifact_type == "pdf"
-        assert intent.tool_name == "pdf.create"
+
+    def test_general_purpose_pitch_deck(self):
+        intent = detect_artifact_intent("build a pitch deck for angel investors")
+        assert intent is not None
+        assert intent.artifact_type == "pptx"
+
+    def test_general_purpose_financial_model(self):
+        intent = detect_artifact_intent("create a financial model in excel")
+        assert intent is not None
+        assert intent.artifact_type == "xlsx"
+
+    def test_general_purpose_budget_sheet(self):
+        intent = detect_artifact_intent("prepare a budget sheet for next fiscal year")
+        assert intent is not None
+        assert intent.artifact_type == "xlsx"
+
+    def test_general_purpose_executive_memo(self):
+        intent = detect_artifact_intent("draft an executive memo regarding remote work policy")
+        assert intent is not None
+        assert intent.artifact_type == "docx"
+
+    def test_general_purpose_proposal(self):
+        intent = detect_artifact_intent("write a project proposal for the prospective client")
+        assert intent is not None
+        assert intent.artifact_type == "docx"
+
+    def test_general_purpose_pdf_export(self):
+        intent = detect_artifact_intent("export a pdf summary of the survey results")
+        assert intent is not None
+        assert intent.artifact_type == "pdf"
 
     def test_no_artifact_intent(self):
         assert detect_artifact_intent("what is the temperature reading?") is None
 
     def test_no_artifact_plain_question(self):
         assert detect_artifact_intent("explain how the compressor works") is None
+
+    def test_no_artifact_general_technical_question(self):
+        assert detect_artifact_intent("what is the difference between a mutex and a semaphore?") is None
 
     def test_empty_request(self):
         assert detect_artifact_intent("") is None

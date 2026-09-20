@@ -13,7 +13,6 @@ import yaml
 from backend.agents.artifact_detection import (
     ArtifactIntent,
     detect_artifact_intent,
-    select_artifact_generation_mode,
 )
 from backend.artifacts.code_workflow import CodeArtifactWorkflow
 from backend.agents.runtime import AgentRuntime, RuntimeConfig
@@ -238,20 +237,8 @@ class IndustrialWorkbenchAgent:
                 errors=["Could not determine artifact type from the request."],
             )
 
-        # 2. Select generation mode
-        selected_mode = select_artifact_generation_mode(user_request, generation_mode)
-        if streamer is not None:
-            streamer.emit_thought(f"Selected '{selected_mode}' generation strategy for {intent.artifact_type.upper()}...")
-        if selected_mode == "code" and intent.artifact_type in {"pdf", "document", "docx", "presentation", "pptx", "spreadsheet", "xlsx"}:
-            return await self._generate_code_artifact(
-                user_request=user_request,
-                intent=intent,
-                task_id=task_id,
-                approved_tools=approved_tools,
-                streamer=streamer,
-            )
-
-        return await self._generate_structured_artifact(
+        # 2. Unified code-driven artifact generation
+        return await self._generate_code_artifact(
             user_request=user_request,
             intent=intent,
             task_id=task_id,

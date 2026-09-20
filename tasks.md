@@ -62,7 +62,7 @@ The goals are:
 
 **Objective:** Make `CodeArtifactWorkflow` with helper primitives the single, authoritative artifact creation engine.
 
-- [ ] **Task 2.1: Refactor `backend/agents/artifact_detection.py`**
+- [x] **Task 2.1: Refactor `backend/agents/artifact_detection.py`**
   - Remove `select_artifact_generation_mode()` (mode selection is obsolete)
   - Simplify `ArtifactIntent` to carry `artifact_type` (e.g. `pdf`, `pptx`, `docx`, `xlsx`) without needing synthetic tool names like `document.create`
   - Update intent regex patterns to cleanly classify artifact types
