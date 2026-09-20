@@ -80,17 +80,22 @@ def test_ollama_provider_sends_canonical_vision_request(monkeypatch):
     )
 
     assert captured == {
-        "url": "http://ollama:11434/api/generate",
+        "url": "http://ollama:11434/api/chat",
         "body": {
             "model": "qwen2.5-vl:7b",
-            "prompt": "inspect",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "inspect",
+                    "images": ["base64-image-data"],
+                }
+            ],
             "stream": False,
-            "images": ["base64-image-data"],
         },
     }
     assert response.content == "valve detected"
     assert response.model_id == "vision"
-    assert response.raw["eval_count"] == 5
+    assert response.raw.get("eval_count") == 5
 
 
 def test_ollama_provider_omits_images_field_for_text_request(monkeypatch):
@@ -115,9 +120,9 @@ def test_ollama_provider_omits_images_field_for_text_request(monkeypatch):
         )
     )
 
-    assert "images" not in captured["body"]
+    assert "images" not in captured["body"]["messages"][0]
     assert captured["body"]["model"] == "test:latest"
-    assert captured["body"]["prompt"] == "only text prompt"
+    assert captured["body"]["messages"][0]["content"] == "only text prompt"
     assert response.content == "text answer"
 
 
@@ -170,7 +175,16 @@ def test_ollama_provider_forwards_tool_schemas(monkeypatch):
         )
     )
 
-    assert captured["body"]["tools"] == [tool_schema]
+    assert captured["body"]["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "pdf.create",
+                "description": "Create a PDF",
+                "parameters": {"type": "object", "properties": {"subject": {"type": "string"}}},
+            },
+        }
+    ]
 
 
 def test_ollama_provider_raises_provider_error_on_http_failure(monkeypatch):

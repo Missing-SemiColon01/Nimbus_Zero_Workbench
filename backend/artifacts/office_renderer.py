@@ -26,15 +26,14 @@ class LibreOfficeRenderer:
         ]
         return next((candidate for candidate in candidates if candidate and candidate.is_file()), None)
 
-    async def render(self, source_path: Path, *, preview_name: str) -> tuple[Path, Path]:
+    def render(self, source_path: Path, *, preview_name: str) -> tuple[Path, Path]:
         if not self.soffice_path:
             raise RuntimeError("LibreOffice (soffice) is not installed or not discoverable.")
         if not source_path.is_file():
             raise FileNotFoundError(f"Artifact file does not exist: {source_path}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         command = [str(self.soffice_path), "--headless", "--convert-to", "pdf", "--outdir", str(self.output_dir), str(source_path)]
-        result = await asyncio.to_thread(
-            subprocess.run,
+        result = subprocess.run(
             command,
             capture_output=True,
             text=True,
@@ -53,3 +52,7 @@ class LibreOfficeRenderer:
         document[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False).save(preview_path)
         document.close()
         return pdf_path, preview_path
+
+    async def render_async(self, source_path: Path, *, preview_name: str) -> tuple[Path, Path]:
+        return await asyncio.to_thread(self.render, source_path, preview_name=preview_name)
+

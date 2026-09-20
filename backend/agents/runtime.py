@@ -135,7 +135,14 @@ class AgentRuntime:
         start_time = time.perf_counter()
         resolved_task_id = task_id or str(uuid.uuid4())
         user_msg = ChatMessage(role="user", content=user_request) if user_request.strip() else None
-        initial_messages: list[ChatMessage] = list(messages or [])
+        initial_messages: list[ChatMessage] = []
+        for m in (messages or []):
+            if isinstance(m, ChatMessage):
+                initial_messages.append(m)
+            elif hasattr(m, "role") and hasattr(m, "content"):
+                initial_messages.append(ChatMessage(role=m.role, content=m.content, images=getattr(m, "images", []) or []))
+            elif isinstance(m, dict):
+                initial_messages.append(ChatMessage(role=m.get("role", "user"), content=m.get("content", ""), images=m.get("images", []) or []))
         if user_msg is not None:
             initial_messages.append(user_msg)
         resolved_images = self._validate_attachments(images, "images")
@@ -547,7 +554,15 @@ class AgentRuntime:
         msgs = state.get("messages", [])
         if not msgs:
             return []
-        return msgs if all(isinstance(m, ChatMessage) for m in msgs) else []
+        result: list[ChatMessage] = []
+        for m in msgs:
+            if isinstance(m, ChatMessage):
+                result.append(m)
+            elif hasattr(m, "role") and hasattr(m, "content"):
+                result.append(ChatMessage(role=m.role, content=m.content, images=getattr(m, "images", []) or []))
+            elif isinstance(m, dict):
+                result.append(ChatMessage(role=m.get("role", "user"), content=m.get("content", ""), images=m.get("images", []) or []))
+        return result
 
     async def _generate_with_tools(
         self,

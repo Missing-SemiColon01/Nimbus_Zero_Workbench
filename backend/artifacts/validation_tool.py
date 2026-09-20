@@ -43,10 +43,12 @@ class ArtifactValidateTool(Tool):
             return ToolResult(success=False, output=None, error="render_preview must be a boolean.")
 
         if artifact.type == "pdf":
-            validation = PdfArtifactValidator(self.preview_dir).validate(artifact, required_text=required_text)
+            validator = PdfArtifactValidator(self.preview_dir)
+            validation = await asyncio.to_thread(validator.validate, artifact, required_text=required_text)
         elif artifact.type in {"docx", "pptx", "xlsx"}:
             renderer = LibreOfficeRenderer(self.preview_dir) if render_preview else None
-            validation = OfficeArtifactValidator(renderer).validate(artifact, required_text=required_text, render_preview=render_preview)
+            validator = OfficeArtifactValidator(renderer)
+            validation = await asyncio.to_thread(validator.validate, artifact, required_text=required_text, render_preview=render_preview)
         else:
             return ToolResult(success=False, output=None, error=f"Unsupported artifact type: {artifact.type}")
         output = validation.model_dump(mode="json")
