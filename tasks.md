@@ -51,7 +51,7 @@ The goals are:
   - Remove `ColumnDef`, `SheetSpec`, `SpreadsheetSpec`
   - Retain `Artifact`, `ArtifactValidation`, and `artifact_from_path` (used by validators and storage tracking)
 
-- [ ] **Task 1.4: Update Tool Registry & Configuration files**
+- [x] **Task 1.4: Update Tool Registry & Configuration files**
   - In `backend/tools/setup.py`: Remove imports and registrations for `DocumentCreateTool`, `PresentationCreateTool`, `PdfCreateTool`, and `SpreadsheetCreateTool`
   - In `configs/agents.yaml`: Remove the 4 retired tools; retain only `rag.search`, `vision.analyze`, `sandbox.execute`, and `artifact.validate`
   - In `configs/tools.yaml`: Synchronize tool list with registered tools
@@ -169,7 +169,7 @@ The goals are:
 
 | Phase | Description | Status |
 | :--- | :--- | :--- |
-| **Phase 1** | Retire Legacy Artifact Generators & Dead Code | `Planned` |
+| **Phase 1** | Retire Legacy Artifact Generators & Dead Code | `Completed` |
 | **Phase 2** | Consolidate on Sandbox Code-Driven Artifacts | `Planned` |
 | **Phase 3** | Conversational Chat Interface & Real Token Streaming | `Planned` |
 | **Phase 4** | Async Concurrency & Backend Reliability | `Planned` |
