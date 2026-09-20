@@ -82,6 +82,7 @@ class AgentGraphState(TypedDict):
     approved_tools: set[str]
     approval_required: bool
     approval_requests: list[dict[str, Any]]
+    streamer: AgentEventStreamer | None
 
 
 class AgentRuntime:
@@ -156,9 +157,6 @@ class AgentRuntime:
         effective_max_steps = max_steps if max_steps is not None else self.config.max_steps
         effective_tool_allowlist = self._effective_tool_allowlist(tool_allowlist)
 
-        # Store streamer on the instance so graph nodes can access it
-        self._streamer = streamer
-
         if streamer is not None:
             streamer.emit_task_init(
                 task_id=resolved_task_id,
@@ -194,6 +192,7 @@ class AgentRuntime:
             "approved_tools": set(approved_tools or ()),
             "approval_required": False,
             "approval_requests": [],
+            "streamer": streamer,
         }
 
         # Pre-validate input state before invoking workflow
@@ -379,7 +378,7 @@ class AgentRuntime:
         """Validate input state fields inside the graph workflow and transition to running."""
         step_count, node_history = self._track_step(state, "validate_input")
         validate_state(state, require_model=False)
-        streamer: AgentEventStreamer | None = getattr(self, "_streamer", None)
+        streamer: AgentEventStreamer | None = state.get("streamer")
         if streamer is not None:
             streamer.emit_thought("Selecting model and preparing request...")
         return {
@@ -392,6 +391,9 @@ class AgentRuntime:
         """Validate output state fields including selected_model."""
         step_count, node_history = self._track_step(state, "validate_output")
         validate_state(state, require_model=True)
+        streamer: AgentEventStreamer | None = state.get("streamer")
+        if streamer is not None:
+            streamer.emit_thought("Finalizing response...")
         return {
             "step_count": step_count,
             "node_history": node_history,
@@ -400,7 +402,7 @@ class AgentRuntime:
     async def _generate_response(self, state: AgentGraphState) -> dict[str, Any]:
         """Route and generate through the existing provider abstraction with retry limits."""
         step_count, node_history = self._track_step(state, "generate_response")
-        streamer: AgentEventStreamer | None = getattr(self, "_streamer", None)
+        streamer: AgentEventStreamer | None = state.get("streamer")
         if streamer is not None:
             streamer.emit_thought("Generating response...")
 
@@ -638,7 +640,7 @@ class AgentRuntime:
     ) -> ToolExecutionResult:
         """Wrapper around _execute_tool_call that emits SSE events before/after execution."""
         import time as _time
-        streamer: AgentEventStreamer | None = getattr(self, "_streamer", None)
+        streamer: AgentEventStreamer | None = state.get("streamer")
         tool_descriptions = {
             "sandbox.execute": "Executing Python code in isolated Docker sandbox",
             "rag.search": "Searching knowledge base for relevant context",

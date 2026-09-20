@@ -1,5 +1,6 @@
 """Offline LibreOffice conversion for Office-artifact visual QA."""
 
+import asyncio
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,14 +26,21 @@ class LibreOfficeRenderer:
         ]
         return next((candidate for candidate in candidates if candidate and candidate.is_file()), None)
 
-    def render(self, source_path: Path, *, preview_name: str) -> tuple[Path, Path]:
+    async def render(self, source_path: Path, *, preview_name: str) -> tuple[Path, Path]:
         if not self.soffice_path:
             raise RuntimeError("LibreOffice (soffice) is not installed or not discoverable.")
         if not source_path.is_file():
             raise FileNotFoundError(f"Artifact file does not exist: {source_path}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
         command = [str(self.soffice_path), "--headless", "--convert-to", "pdf", "--outdir", str(self.output_dir), str(source_path)]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=self.timeout_seconds, check=False)
+        result = await asyncio.to_thread(
+            subprocess.run,
+            command,
+            capture_output=True,
+            text=True,
+            timeout=self.timeout_seconds,
+            check=False,
+        )
         pdf_path = self.output_dir / f"{source_path.stem}.pdf"
         if result.returncode != 0 or not pdf_path.is_file():
             detail = result.stderr.strip() or result.stdout.strip() or "no PDF output produced"

@@ -7,6 +7,20 @@ from typing import Any
 
 import pytest
 
+def _has_reportlab():
+    try:
+        import reportlab  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+def _has_docker():
+    try:
+        import docker  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
 from backend.agents.artifact_detection import ArtifactIntent, detect_artifact_intent
 from backend.agents.industrial_workbench import (
     AGENT_ID,
@@ -309,6 +323,7 @@ class TestGenerateArtifactCodeWorkflow:
         assert result.generation_mode == "code"
         assert Path(result.path).exists()
 
+    @pytest.mark.skipif(not _has_reportlab(), reason="reportlab not installed, PDF generation requires Docker sandbox")
     def test_generate_pdf_artifact(self, tmp_path: Path):
         code = (
             "from reportlab.platypus import SimpleDocTemplate, Paragraph\n"

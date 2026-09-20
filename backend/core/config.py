@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     sandbox_mem_limit: str = "256m"
     sandbox_cpu_quota: int = 50_000
     sandbox_max_retries: int = 3
+    cors_origins: list[str] = ["*"]
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

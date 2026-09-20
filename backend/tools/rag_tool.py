@@ -20,6 +20,7 @@ Capabilities:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -98,7 +99,8 @@ class RAGSearchTool(Tool):
             score_threshold = float(score_threshold)
 
         try:
-            hits = self.retriever.search(
+            hits = await asyncio.to_thread(
+                self.retriever.search,
                 query=query,
                 top_k=top_k,
                 score_threshold=score_threshold,

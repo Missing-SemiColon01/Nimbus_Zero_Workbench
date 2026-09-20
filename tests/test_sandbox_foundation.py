@@ -63,7 +63,17 @@ def test_docker_executor_passes_isolation_flags():
     mock_container = MagicMock()
     mock_container.wait.return_value = {"StatusCode": 0}
     mock_container.logs.return_value = b""
-    mock_docker.from_env.return_value.containers.run.return_value = mock_container
+
+    # Simulate user iteration: first two fail (None, host_uid_gid), third succeeds (runner)
+    call_count = 0
+    def run_side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise Exception("user not found")
+        return mock_container
+
+    mock_docker.from_env.return_value.containers.run.side_effect = run_side_effect
 
     with patch.dict("sys.modules", {"docker": mock_docker}):
         result = DockerSandboxExecutor(image="test-image").run(SandboxRequest(code="print(1)"))

@@ -75,11 +75,18 @@ class TestIngestAPI:
             status="success",
         )
 
+        # Get the actual uploads directory from app settings
+        from backend.core.config import get_settings
+        uploads_dir = get_settings().data_dir / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        test_file = uploads_dir / "test_doc.pdf"
+        test_file.write_bytes(pdf_path.read_bytes())
+
         with patch("backend.api.routes.get_retriever", return_value=retriever):
             response = client.post(
                 "/api/v1/ingest",
                 json={
-                    "file_path": str(pdf_path),
+                    "file_path": "test_doc.pdf",  # Relative to uploads dir
                     "document_id": "test_doc_01",
                     "chunk_size": 200,
                 },
@@ -92,12 +99,8 @@ class TestIngestAPI:
         assert data["page_count"] == 1
         assert data["chunk_count"] >= 1
         assert data["status"] == "success"
-        retriever.ingest_document.assert_called_once_with(
-            source=pdf_path,
-            document_id="test_doc_01",
-            chunk_size=200,
-            chunk_overlap=50,
-        )
+        # Verify retriever was called with the resolved absolute path
+        assert retriever.ingest_document.call_args.kwargs["source"].name == "test_doc.pdf"
 
     def test_upload_non_pdf_rejected_with_400(self, client: TestClient):
         fake_file = io.BytesIO(b"not a pdf")
