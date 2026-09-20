@@ -11,6 +11,7 @@ from backend.models.registry import ModelRegistry
 from backend.models.router import ModelRouter
 from backend.tools.contracts import Tool, ToolResult
 from backend.tools.registry import ToolRegistry
+from backend.security.policy import PolicyEngine
 
 
 class FailingOverProvider(ModelProvider):
@@ -58,7 +59,7 @@ def test_runtime_falls_back_after_provider_error(tmp_path: Path):
     assert state.attempted_models == ["primary", "backup"]
     assert state.user_prompt == "hello"
     assert state.final_response == "fallback response"
-    assert state.messages == ["hello", "fallback response"]
+    assert [m.content if hasattr(m, "content") else m for m in state.messages] == ["hello", "fallback response"]
     assert state.errors == ["network unavailable"]
     assert state.plan == ["generate_response"]
     assert provider.calls == ["primary", "backup"]
@@ -114,7 +115,7 @@ def test_runtime_successful_generation(tmp_path: Path):
     assert state.attempted_models == ["primary"]
     assert state.user_prompt == "hello world"
     assert state.final_response == "successful response"
-    assert state.messages == ["hello world", "successful response"]
+    assert [m.content if hasattr(m, "content") else m for m in state.messages] == ["hello world", "successful response"]
     assert state.errors == []
     assert state.plan == ["generate_response"]
     assert isinstance(state.task_id, str) and len(state.task_id) > 0
@@ -171,7 +172,7 @@ def test_runtime_provider_failure_returns_predictable_response(tmp_path: Path):
     assert state.errors == ["Ollama connection refused", "Ollama connection refused"]
     assert response.content.startswith("Model generation failed: Ollama connection refused")
     assert state.final_response == response.content
-    assert state.messages == ["test prompt", response.content]
+    assert [m.content if hasattr(m, "content") else m for m in state.messages] == ["test prompt", response.content]
     assert state.selected_model == "backup"
     assert state.provider is None
     assert provider.calls == ["primary", "backup"]
@@ -458,6 +459,7 @@ def runtime_with_tools(
     provider: ModelProvider,
     tool: Tool,
     runtime_config: RuntimeConfig | None = None,
+    policy: PolicyEngine | None = None,
 ) -> AgentRuntime:
     models_config = tmp_path / "models.yaml"
     models_config.write_text(
@@ -477,6 +479,7 @@ def runtime_with_tools(
         ModelProviderRegistry({"fake": provider}),
         tools=registry,
         config=runtime_config,
+        policy=policy,
     )
 
 
@@ -653,7 +656,12 @@ def test_runtime_denies_tool_outside_agent_or_user_allowlist(tmp_path: Path):
 
 def test_runtime_returns_approval_request_for_risky_tool(tmp_path: Path):
     tool = TrackingTool("document.create")
-    rt = runtime_with_tools(tmp_path, tool_calling_provider(tool.name), tool)
+    rt = runtime_with_tools(
+        tmp_path,
+        tool_calling_provider(tool.name),
+        tool,
+        policy=PolicyEngine(approval_tools={"document.create"}),
+    )
 
     state, _ = asyncio.run(rt.run("create document", {"reasoning", "tool_calling"}))
 

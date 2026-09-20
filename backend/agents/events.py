@@ -33,6 +33,8 @@ import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, AsyncIterator
 
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Typed event payloads

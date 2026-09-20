@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import asyncio
+import inspect
 import logging
 import shutil
 from pathlib import Path
@@ -188,15 +189,22 @@ async def create_task(payload: TaskCreate, request: Request):
     if documents and payload.task_type is None and not payload.capabilities:
         required_capabilities = {"document_understanding"}
     try:
+        run_kwargs: dict[str, Any] = {
+            "images": payload.images,
+            "documents": documents,
+            "approved_tools": payload.approved_tools,
+        }
+        sig = inspect.signature(request.app.state.agent.run)
+        if "messages" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            run_kwargs["messages"] = payload.messages
+        if "session_id" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            run_kwargs["session_id"] = payload.session_id
+
         state, model_response = await request.app.state.agent.run(
             payload.request,
             required_capabilities,
             payload.modality,
-            images=payload.images,
-            documents=documents,
-            approved_tools=payload.approved_tools,
-            messages=payload.messages,
-            session_id=payload.session_id,
+            **run_kwargs,
         )
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -273,16 +281,23 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                 if documents and payload.task_type is None and not payload.capabilities:
                     required_capabilities = {"document_understanding"}
 
+                run_kwargs: dict[str, Any] = {
+                    "images": payload.images,
+                    "documents": documents,
+                    "approved_tools": payload.approved_tools,
+                    "streamer": streamer,
+                }
+                sig = inspect.signature(agent.run)
+                if "messages" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    run_kwargs["messages"] = payload.messages
+                if "session_id" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    run_kwargs["session_id"] = payload.session_id
+
                 state, model_response = await agent.run(
                     payload.request,
                     required_capabilities,
                     payload.modality,
-                    images=payload.images,
-                    documents=documents,
-                    approved_tools=payload.approved_tools,
-                    streamer=streamer,
-                    messages=payload.messages,
-                    session_id=payload.session_id,
+                    **run_kwargs,
                 )
 
                 streamer.emit_task_complete(

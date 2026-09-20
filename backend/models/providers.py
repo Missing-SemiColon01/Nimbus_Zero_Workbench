@@ -162,6 +162,8 @@ class OllamaProvider(ModelProvider):
         if not isinstance(message, dict):
             raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'")
         content = message.get("content", "")
+        if not content and isinstance(data.get("response"), str):
+            content = data.get("response", "")
         if not isinstance(content, str):
             raise ProviderError(f"Ollama returned an invalid response for model '{model.id}'")
         tool_calls = OllamaProvider._tool_calls_from_data(data)

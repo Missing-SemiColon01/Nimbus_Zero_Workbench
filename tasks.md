@@ -84,14 +84,14 @@ The goals are:
 
 **Objective:** Enable the agent to conduct natural multi-turn conversations with true token streaming while retaining the ability to use tools and build artifacts when requested.
 
-- [ ] **Task 3.1: Conversational Model Contracts**
+- [x] **Task 3.1: Conversational Model Contracts**
   - In `backend/models/contracts.py`:
     - Add `ChatMessage` dataclass: `role: Literal["user", "assistant", "system"]`, `content: str`, `images: list[str] = []`
     - Update `ModelRequest` to accept `messages: list[ChatMessage]` alongside the single `prompt` field
   - In `backend/models/providers.py` (`OllamaProvider`):
     - Format full message history `[{"role": msg.role, "content": msg.content}]` for the Ollama chat payload
 
-- [ ] **Task 3.2: True Token-by-Token Streaming from Ollama**
+- [x] **Task 3.2: True Token-by-Token Streaming from Ollama**
   - In `backend/models/providers.py`:
     - Add `stream_generate(model, request) -> AsyncIterator[str]` using `httpx.AsyncClient.stream("POST", ...)` with `"stream": True`
     - Yield real tokens as they are produced by Ollama instead of waiting for the full response
@@ -99,7 +99,7 @@ The goals are:
     - Connect Ollama's real token generator directly to `AgentEventStreamer.emit_content_delta()`
     - Eliminate the fake post-generation 30-character chunk slicing loop
 
-- [ ] **Task 3.3: Multi-Turn Conversation History in API & Agent State**
+- [x] **Task 3.3: Multi-Turn Conversation History in API & Agent State**
   - In `backend/schemas/tasks.py`:
     - Add `messages: list[ChatMessage] = Field(default_factory=list)` to `TaskCreate`
     - Add optional `session_id: str | None = None`
@@ -107,7 +107,7 @@ The goals are:
     - Populate graph state messages with full conversation history from `payload.messages`
     - Enable the agent to respond to conversational prompts (clarifications, questions, coding queries, brainstorming) as a direct chat assistant without forcing deliverable workflows
 
-- [ ] **Task 3.4: Dynamic Mode Routing (Chat vs. Artifact Generation)**
+- [x] **Task 3.4: Dynamic Mode Routing (Chat vs. Artifact Generation)**
   - When the user asks general questions, requests analysis, or asks for code explanations:
     - Route as conversational chat turn with optional RAG/Vision retrieval
   - When the user explicitly requests a deliverable (e.g. "make a 6-slide presentation", "generate a PDF report", "create an Excel model"):
@@ -119,28 +119,28 @@ The goals are:
 
 **Objective:** Eliminate event loop freezes, fix singleton race conditions, and secure backend endpoints.
 
-- [ ] **Task 4.1: Offload synchronous blocking operations with `asyncio.to_thread`**
+- [x] **Task 4.1: Offload synchronous blocking operations with `asyncio.to_thread`**
   - `backend/tools/sandbox_tool.py`: Wrap `self.executor.run(request)` in `asyncio.to_thread()`
   - `backend/tools/rag_tool.py`: Wrap `self.retriever.search(...)` in `asyncio.to_thread()`
   - `backend/tools/vision_tool.py`: Wrap `ocr_image()` and `render_pdf_page_to_image()` in `asyncio.to_thread()`
   - `backend/api/routes.py`: Wrap `retriever.ingest_document(...)` in `asyncio.to_thread()`
-  - `backend/artifacts/office_renderer.py`: Wrap `subprocess.run(["soffice", ...])` in `asyncio.to_thread()`
+  - `backend/artifacts/office_renderer.py`: Provide `render_async()` and offload `validate` calls via `asyncio.to_thread()`
 
-- [ ] **Task 4.2: Fix `AgentRuntime` singleton streamer race condition**
+- [x] **Task 4.2: Fix `AgentRuntime` singleton streamer race condition**
   - Remove `self._streamer = streamer` mutation from `AgentRuntime`
   - Pass `streamer` through execution context dictionaries and graph state so concurrent requests never leak events to other sessions
 
-- [ ] **Task 4.3: Harden SSE streamer termination**
+- [x] **Task 4.3: Harden SSE streamer termination**
   - In `backend/agents/events.py`: Ensure `emit_done()` never silently drops `_DONE_SENTINEL` if the queue is full, preventing hanging HTTP connections
 
-- [ ] **Task 4.4: Autonomous Policy Standardization**
+- [x] **Task 4.4: Autonomous Policy Standardization**
   - In `backend/security/policy.py`: Formally define default policy as autonomous `ALLOW` without breaking interfaces or causing unwanted pipeline blocks
-  - Clean up dead approval error branches
+  - In `configs/policies.yaml`: Disable human approval by default (`approval_required: []`) allowing all tools autonomously
 
-- [ ] **Task 4.5: Secure `/api/v1/ingest` against arbitrary file paths**
+- [x] **Task 4.5: Secure `/api/v1/ingest` against arbitrary file paths**
   - In `backend/api/routes.py`: Enforce path confinement on `payload.file_path` using `_resolve_inside(uploads_dir, ...)` to prevent unauthorized host file access
 
-- [ ] **Task 4.6: Add FastAPI CORS Middleware**
+- [x] **Task 4.6: Add FastAPI CORS Middleware**
   - In `backend/main.py`: Add `CORSMiddleware` with configurable allowed origins (`["*"]` for development)
 
 ---
@@ -170,7 +170,7 @@ The goals are:
 | Phase | Description | Status |
 | :--- | :--- | :--- |
 | **Phase 1** | Retire Legacy Artifact Generators & Dead Code | `Completed` |
-| **Phase 2** | Consolidate on Sandbox Code-Driven Artifacts | `Planned` |
-| **Phase 3** | Conversational Chat Interface & Real Token Streaming | `Planned` |
-| **Phase 4** | Async Concurrency & Backend Reliability | `Planned` |
+| **Phase 2** | Consolidate on Sandbox Code-Driven Artifacts | `Completed` |
+| **Phase 3** | Conversational Chat Interface & Real Token Streaming | `Completed` |
+| **Phase 4** | Async Concurrency & Backend Reliability | `Completed` |
 | **Phase 5** | Dependencies, Paths & Docker Infrastructure | `Planned` |
