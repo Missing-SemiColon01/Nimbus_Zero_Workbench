@@ -20,7 +20,6 @@ from backend.tools.rag_tool import RAGSearchTool
 from backend.tools.registry import ToolRegistry
 from backend.tools.setup import build_tool_registry
 from backend.tools.vision_tool import VisionAnalyzeTool
-from backend.artifacts.tools import DocumentCreateTool, PdfCreateTool, PresentationCreateTool
 from backend.artifacts.validation_tool import ArtifactValidateTool
 from backend.tools.sandbox_tool import SandboxTool
 
@@ -39,9 +38,7 @@ class TestBuildToolRegistry:
 
         assert isinstance(registry, ToolRegistry)
         names = registry.names()
-        assert "rag.search" in names
-        assert "vision.analyze" in names
-        assert {"document.create", "presentation.create", "pdf.create", "artifact.validate", "sandbox.execute"}.issubset(names)
+        assert set(names) == {"rag.search", "vision.analyze", "artifact.validate", "sandbox.execute"}
 
         # Verify tool instances
         rag_tool = registry.get("rag.search")
@@ -52,9 +49,6 @@ class TestBuildToolRegistry:
         assert isinstance(vision_tool, VisionAnalyzeTool)
         assert vision_tool.provider is mock_provider
 
-        assert isinstance(registry.get("document.create"), DocumentCreateTool)
-        assert isinstance(registry.get("presentation.create"), PresentationCreateTool)
-        assert isinstance(registry.get("pdf.create"), PdfCreateTool)
         assert isinstance(registry.get("artifact.validate"), ArtifactValidateTool)
         assert isinstance(registry.get("sandbox.execute"), SandboxTool)
 
@@ -83,6 +77,4 @@ class TestFastAPILifespanWiring:
             assert hasattr(app.state, "tools")
             tools: ToolRegistry = app.state.tools
             assert isinstance(tools, ToolRegistry)
-            assert "rag.search" in tools.names()
-            assert "vision.analyze" in tools.names()
-            assert {"document.create", "presentation.create", "pdf.create", "artifact.validate", "sandbox.execute"}.issubset(tools.names())
+            assert {"rag.search", "vision.analyze", "artifact.validate", "sandbox.execute"}.issubset(tools.names())

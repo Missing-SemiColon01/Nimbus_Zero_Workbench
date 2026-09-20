@@ -11,10 +11,6 @@ agents:
     tools:
       - rag.search
       - vision.analyze
-      - document.create
-      - spreadsheet.create
-      - presentation.create
-      - pdf.create
       - artifact.validate
       - sandbox.execute
     runtime:
