@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -58,7 +59,7 @@ class SandboxTool(Tool):
         )
 
         try:
-            result = self.executor.run(request)
+            result = await asyncio.to_thread(self.executor.run, request)
         except Exception as exc:
             logger.exception("Sandbox execution failed.")
             return ToolResult(success=False, output=None, error=str(exc))

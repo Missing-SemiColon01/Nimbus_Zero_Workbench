@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.agents.industrial_workbench import IndustrialWorkbenchAgent
 from backend.agents.runtime import AgentRuntime
@@ -43,4 +44,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sovereign AI Workbench", version="0.1.0", lifespan=lifespan)
+
+settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins if hasattr(settings, 'cors_origins') else ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(router, prefix="/api/v1")

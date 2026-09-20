@@ -18,6 +18,7 @@ Capabilities:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import logging
@@ -206,7 +207,7 @@ class VisionAnalyzeTool(Tool):
             target_path = Path(raw_path)
             is_pdf = target_path.is_file() and target_path.suffix.lower() == ".pdf"
             if is_pdf:
-                raw_bytes = render_pdf_page_to_image(target_path, page_number=page_number)
+                raw_bytes = await asyncio.to_thread(render_pdf_page_to_image, target_path, page_number=page_number)
                 base64_image = base64.b64encode(raw_bytes).decode("utf-8")
             else:
                 base64_image = encode_image_to_base64(raw_path)
@@ -222,7 +223,7 @@ class VisionAnalyzeTool(Tool):
         # 2. Extract OCR text from the rendered image / document
         ocr_text = ""
         try:
-            ocr_result = ocr_image(raw_bytes)
+            ocr_result = await asyncio.to_thread(ocr_image, raw_bytes)
             if ocr_result.has_text:
                 ocr_text = ocr_result.text.strip()
         except Exception as ocr_exc:

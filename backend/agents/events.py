@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Any, AsyncIterator
@@ -240,12 +241,16 @@ class AgentEventStreamer:
     def emit_task_error(self, error: str, task_id: str | None = None) -> None:
         self._put("task_error", TaskErrorPayload(error=error, task_id=task_id))
 
-    def emit_done(self) -> None:
-        """Signal the consumer that the stream is finished."""
+    async def emit_done(self) -> None:
+        """Signal the consumer that the stream is finished. Blocks until queued."""
         try:
             self._queue.put_nowait(_DONE_SENTINEL)
         except asyncio.QueueFull:
-            pass
+            # If queue is full, block with timeout to ensure sentinel delivery
+            try:
+                await asyncio.wait_for(self._queue.put(_DONE_SENTINEL), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("SSE streamer: queue full, unable to emit done sentinel after 5s")
 
     # -- Consumer (async iterator) -------------------------------------------
 

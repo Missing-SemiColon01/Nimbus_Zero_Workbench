@@ -14,7 +14,10 @@ class PolicyDecision(StrEnum):
 
 
 class PolicyEngine:
-    approval_tools = set()
+    def __init__(self, approval_tools: set[str] | None = None):
+        self.approval_tools = approval_tools or set()
 
     def evaluate(self, tool_name: str) -> PolicyDecision:
-        return PolicyDecision.REQUIRE_APPROVAL if tool_name in self.approval_tools else PolicyDecision.ALLOW
+        if tool_name in self.approval_tools:
+            return PolicyDecision.REQUIRE_APPROVAL
+        return PolicyDecision.ALLOW  # Default autonomous ALLOW

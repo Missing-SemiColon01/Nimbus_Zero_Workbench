@@ -1,5 +1,6 @@
 """Local structural validation for DOCX and PPTX deliverables."""
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -60,7 +61,7 @@ class OfficeArtifactValidator:
                 findings.append("LibreOffice renderer was not configured.")
             else:
                 try:
-                    _, preview_path = self.renderer.render(path, preview_name=artifact.id)
+                    _, preview_path = asyncio.run(self.renderer.render(path, preview_name=artifact.id))
                     checks["preview_rendered"] = True
                 except (FileNotFoundError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                     checks["preview_rendered"] = False

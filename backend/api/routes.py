@@ -294,7 +294,7 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
         except Exception as exc:
             streamer.emit_task_error(str(exc))
         finally:
-            streamer.emit_done()
+            await streamer.emit_done()
 
     # Fire the agent task in the background; SSE drains the queue concurrently
     asyncio.create_task(_run_task())
@@ -385,12 +385,12 @@ async def ingest_file_path(payload: IngestRequest, request: Request):
     Ingest a PDF document from an accessible filesystem path.
     Runs parsing, OCR fallback, token chunking, and local vector indexing.
     """
-    path = Path(payload.file_path)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"File not found: {payload.file_path}")
+    uploads_dir: Path = request.app.state.settings.data_dir / "uploads"
+    path = _resolve_inside(uploads_dir, payload.file_path)
 
     retriever: KnowledgeRetriever = get_retriever()
-    result = retriever.ingest_document(
+    result = await asyncio.to_thread(
+        retriever.ingest_document,
         source=path,
         document_id=payload.document_id,
         chunk_size=payload.chunk_size,
@@ -430,7 +430,8 @@ async def ingest_upload(
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {exc}") from exc
 
     retriever: KnowledgeRetriever = get_retriever()
-    result = retriever.ingest_document(
+    result = await asyncio.to_thread(
+        retriever.ingest_document,
         source=target_path,
         document_id=document_id or target_path.stem,
         chunk_size=chunk_size,
