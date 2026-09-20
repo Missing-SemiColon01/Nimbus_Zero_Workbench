@@ -492,12 +492,18 @@ class CodeArtifactWorkflow:
         skill_filename = skill_file_map.get(artifact_type)
         skill_content = ""
         if skill_filename:
-            skill_path = Path("sandbox/skills") / skill_filename
-            if skill_path.exists():
-                try:
-                    skill_content = skill_path.read_text(encoding="utf-8").strip()
-                except Exception:
-                    pass
+            candidate_paths = [
+                Path("sandbox/skills") / skill_filename,
+                Path(__file__).resolve().parent.parent.parent / "sandbox" / "skills" / skill_filename,
+            ]
+            for candidate in candidate_paths:
+                if candidate.exists():
+                    try:
+                        skill_content = candidate.read_text(encoding="utf-8").strip()
+                        if skill_content:
+                            break
+                    except Exception:
+                        pass
 
         # Example pattern to guide LLM with correct imports and API calls
         template_example = ""

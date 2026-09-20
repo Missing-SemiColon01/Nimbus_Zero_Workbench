@@ -67,7 +67,7 @@ The goals are:
   - Simplify `ArtifactIntent` to carry `artifact_type` (e.g. `pdf`, `pptx`, `docx`, `xlsx`) without needing synthetic tool names like `document.create`
   - Update intent regex patterns to cleanly classify artifact types
 
-- [ ] **Task 2.2: Streamline `backend/agents/industrial_workbench.py`**
+- [x] **Task 2.2: Streamline `backend/agents/industrial_workbench.py`**
   - Remove `_generate_structured_artifact()` and its helper methods (`_extract_tool_arguments`, `_find_tool_result`, `_tool_parameter_schema`)
   - Route all artifact generation calls directly through `_generate_code_artifact()` via `CodeArtifactWorkflow`
   - Fix runtime crash bug on line 415: change `model_response` to `model_response.content` in regex search

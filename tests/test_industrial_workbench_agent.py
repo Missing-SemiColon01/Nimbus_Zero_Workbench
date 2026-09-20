@@ -77,10 +77,6 @@ def test_industrial_workbench_agent_is_created_from_config_and_sets_system_promp
     for name in (
         "rag.search",
         "vision.analyze",
-        "document.create",
-        "spreadsheet.create",
-        "presentation.create",
-        "pdf.create",
         "artifact.validate",
         "sandbox.execute",
     ):
