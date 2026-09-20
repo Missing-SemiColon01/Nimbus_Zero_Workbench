@@ -40,12 +40,12 @@ The goals are:
   - Remove `backend/artifacts/tools.py` (legacy tool adapters: `DocumentCreateTool`, `PresentationCreateTool`, `PdfCreateTool`, `SpreadsheetCreateTool`)
   - Remove `backend/artifacts/deck_workflow.py` (unused dead compatibility stub)
 
-- [ ] **Task 1.2: Delete empty packages & directories**
+- [x] **Task 1.2: Delete empty packages & directories**
   - Remove `backend/db/` (empty package containing only `__init__.py`)
   - Remove `prompts/` (empty directory with `.gitkeep`)
   - Remove `templates/` and subdirectories (`approval_notes/`, `docx/`, `pptx/`)
 
-- [ ] **Task 1.3: Strip legacy schemas from `backend/artifacts/contracts.py`**
+- [x] **Task 1.3: Strip legacy schemas from `backend/artifacts/contracts.py`**
   - Remove `ApprovalNoteSpec`
   - Remove `SlideLayout`, `ChartSeries`, `SlideSpec`, `PresentationSpec`
   - Remove `ColumnDef`, `SheetSpec`, `SpreadsheetSpec`
