@@ -34,7 +34,7 @@ class OfficeArtifactValidator:
             )
         try:
             text, unit_count = self._extract_content(path, artifact.type)
-        except (OSError, ValueError, KeyError, TypeError) as error:
+        except Exception as error:
             return ArtifactValidation(
                 artifact_id=artifact.id,
                 valid=False,
@@ -78,14 +78,25 @@ class OfficeArtifactValidator:
     def _extract_content(path: Path, artifact_type: str) -> tuple[str, int]:
         if artifact_type == "docx":
             document = Document(path)
-            text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-            return text, len(document.paragraphs)
+            para_texts = [p.text for p in document.paragraphs if p.text.strip()]
+            table_texts = []
+            for table in document.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        ct = cell.text.strip()
+                        if ct:
+                            table_texts.append(ct)
+            all_text = "\n".join([*para_texts, *table_texts])
+            unit_count = len(document.paragraphs) + len(document.tables)
+            return all_text, unit_count
 
         if artifact_type == "xlsx":
             from openpyxl import load_workbook
             wb = load_workbook(path, read_only=True, data_only=True)
             cell_texts = []
             for ws in wb.worksheets:
+                if ws.title:
+                    cell_texts.append(ws.title)
                 for row in ws.iter_rows(values_only=True):
                     cell_texts.extend(str(v) for v in row if v is not None)
             sheet_count = len(wb.worksheets)

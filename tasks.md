@@ -62,18 +62,18 @@ The goals are:
 
 **Objective:** Make `CodeArtifactWorkflow` with helper primitives the single, authoritative artifact creation engine.
 
-- [ ] **Task 2.1: Refactor `backend/agents/artifact_detection.py`**
+- [x] **Task 2.1: Refactor `backend/agents/artifact_detection.py`**
   - Remove `select_artifact_generation_mode()` (mode selection is obsolete)
   - Simplify `ArtifactIntent` to carry `artifact_type` (e.g. `pdf`, `pptx`, `docx`, `xlsx`) without needing synthetic tool names like `document.create`
   - Update intent regex patterns to cleanly classify artifact types
 
-- [ ] **Task 2.2: Streamline `backend/agents/industrial_workbench.py`**
+- [x] **Task 2.2: Streamline `backend/agents/industrial_workbench.py`**
   - Remove `_generate_structured_artifact()` and its helper methods (`_extract_tool_arguments`, `_find_tool_result`, `_tool_parameter_schema`)
   - Route all artifact generation calls directly through `_generate_code_artifact()` via `CodeArtifactWorkflow`
   - Fix runtime crash bug on line 415: change `model_response` to `model_response.content` in regex search
   - Ensure skill files (`sandbox/skills/pptx_skill.md`, `sandbox/skills/docx_skill.md`, `sandbox/skills/pdf_skill.md`) and helpers are correctly resolved
 
-- [ ] **Task 2.3: Enhance `backend/artifacts/code_workflow.py`**
+- [x] **Task 2.3: Enhance `backend/artifacts/code_workflow.py`**
   - Ensure robust self-contained script prompts for all 4 deliverable formats (`pptx`, `docx`, `pdf`, `xlsx`)
   - Ensure error feedback and tracebacks are fed back into repair attempts for up to `max_iterations`
   - Update `OfficeArtifactValidator` to include Word tables (`document.tables`) in content checks so valid documents don't fail validation

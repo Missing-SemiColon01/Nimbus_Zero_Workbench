@@ -52,34 +52,6 @@ class FailingProvider(ModelProvider):
         raise RuntimeError("provider exploded")
 
 
-class FakeArtifactTool(Tool):
-    """Simulates an artifact-creation tool that succeeds with realistic output."""
-
-    def __init__(self, name: str, *, succeed: bool = True):
-        self.name = name
-        self._succeed = succeed
-        self.call_count = 0
-        self.last_arguments: dict[str, Any] = {}
-
-    async def execute(self, arguments: dict[str, Any], context: dict[str, Any]) -> ToolResult:
-        self.call_count += 1
-        self.last_arguments = arguments
-        if not self._succeed:
-            return ToolResult(success=False, output=None, error="disk full")
-        return ToolResult(
-            success=True,
-            output={
-                "id": "art-001",
-                "type": self.name.split(".")[0],
-                "filename": f"test-artifact.{self.name.split('.')[0][:4]}",
-                "mime_type": "application/octet-stream",
-                "storage_uri": f"/data/artifacts/test-artifact.{self.name.split('.')[0][:4]}",
-                "task_id": context.get("task_id", "unknown"),
-            },
-            artifacts=[f"/data/artifacts/test-artifact.{self.name.split('.')[0][:4]}"],
-        )
-
-
 class NamedTool(Tool):
     """Minimal stub tool for registry padding."""
 
@@ -124,15 +96,13 @@ def _build_agent(
         "rag.search",
         "vision.analyze",
         "artifact.validate",
-        "sandbox.execute",
     ):
         tools.register(NamedTool(name))
 
-    # The agent configuration allows all four artifact tools.  Register the
-    # complete set for every fixture, then replace a named tool with the fake
-    # supplied by the individual test.
-    for name in ("document.create", "presentation.create", "pdf.create", "spreadsheet.create"):
-        tools.register(NamedTool(name))
+    from backend.sandbox.executor import build_executor
+    from backend.tools.sandbox_tool import SandboxTool
+    tools.register(SandboxTool(executor=build_executor()))
+
     for tool in (extra_tools or {}).values():
         tools.register(tool)
 
@@ -147,76 +117,99 @@ def _build_agent(
 class TestDetectArtifactIntent:
     """Unit tests for the detect_artifact_intent function."""
 
-    def test_report_task_type_defaults_to_document(self):
+    def test_report_task_type_defaults_to_docx(self):
         intent = detect_artifact_intent("summarize the findings", task_type="report")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
-    def test_artifact_task_type_defaults_to_document(self):
+    def test_artifact_task_type_defaults_to_docx(self):
         intent = detect_artifact_intent("summarize the findings", task_type="artifact")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
     def test_report_task_type_with_presentation_keyword(self):
         intent = detect_artifact_intent("create a presentation about safety", task_type="report")
         assert intent is not None
-        assert intent.artifact_type == "presentation"
-        assert intent.tool_name == "presentation.create"
+        assert intent.artifact_type == "pptx"
 
     def test_report_task_type_with_pdf_keyword(self):
         intent = detect_artifact_intent("generate a pdf for the audit", task_type="report")
         assert intent is not None
         assert intent.artifact_type == "pdf"
-        assert intent.tool_name == "pdf.create"
 
     def test_report_task_type_with_spreadsheet_keyword(self):
         intent = detect_artifact_intent("create a spreadsheet with inspection data", task_type="artifact")
         assert intent is not None
-        assert intent.artifact_type == "spreadsheet"
-        assert intent.tool_name == "spreadsheet.create"
+        assert intent.artifact_type == "xlsx"
 
     def test_keyword_document_create(self):
         intent = detect_artifact_intent("Generate a report on the equipment status")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
     def test_keyword_approval_note(self):
         intent = detect_artifact_intent("prepare an approval note for the procurement")
         assert intent is not None
-        assert intent.artifact_type == "document"
-        assert intent.tool_name == "document.create"
+        assert intent.artifact_type == "docx"
 
     def test_keyword_presentation(self):
         intent = detect_artifact_intent("build a presentation for the board meeting")
         assert intent is not None
-        assert intent.artifact_type == "presentation"
-        assert intent.tool_name == "presentation.create"
+        assert intent.artifact_type == "pptx"
 
     def test_keyword_slides(self):
         intent = detect_artifact_intent("create slides about the new safety protocol")
         assert intent is not None
-        assert intent.artifact_type == "presentation"
+        assert intent.artifact_type == "pptx"
 
     def test_keyword_spreadsheet(self):
         intent = detect_artifact_intent("produce an excel workbook with monthly stats")
         assert intent is not None
-        assert intent.artifact_type == "spreadsheet"
-        assert intent.tool_name == "spreadsheet.create"
+        assert intent.artifact_type == "xlsx"
 
     def test_keyword_pdf(self):
         intent = detect_artifact_intent("create a pdf with the inspection summary")
         assert intent is not None
         assert intent.artifact_type == "pdf"
-        assert intent.tool_name == "pdf.create"
+
+    def test_general_purpose_pitch_deck(self):
+        intent = detect_artifact_intent("build a pitch deck for angel investors")
+        assert intent is not None
+        assert intent.artifact_type == "pptx"
+
+    def test_general_purpose_financial_model(self):
+        intent = detect_artifact_intent("create a financial model in excel")
+        assert intent is not None
+        assert intent.artifact_type == "xlsx"
+
+    def test_general_purpose_budget_sheet(self):
+        intent = detect_artifact_intent("prepare a budget sheet for next fiscal year")
+        assert intent is not None
+        assert intent.artifact_type == "xlsx"
+
+    def test_general_purpose_executive_memo(self):
+        intent = detect_artifact_intent("draft an executive memo regarding remote work policy")
+        assert intent is not None
+        assert intent.artifact_type == "docx"
+
+    def test_general_purpose_proposal(self):
+        intent = detect_artifact_intent("write a project proposal for the prospective client")
+        assert intent is not None
+        assert intent.artifact_type == "docx"
+
+    def test_general_purpose_pdf_export(self):
+        intent = detect_artifact_intent("export a pdf summary of the survey results")
+        assert intent is not None
+        assert intent.artifact_type == "pdf"
 
     def test_no_artifact_intent(self):
         assert detect_artifact_intent("what is the temperature reading?") is None
 
     def test_no_artifact_plain_question(self):
         assert detect_artifact_intent("explain how the compressor works") is None
+
+    def test_no_artifact_general_technical_question(self):
+        assert detect_artifact_intent("what is the difference between a mutex and a semaphore?") is None
 
     def test_empty_request(self):
         assert detect_artifact_intent("") is None
@@ -231,34 +224,23 @@ class TestDetectArtifactIntent:
 
 
 # ===========================================================================
-# 2. Happy-path orchestration tests
+# 2. Code-driven artifact generation orchestration tests
 # ===========================================================================
 
 
-class TestGenerateArtifactHappyPath:
-    """generate_artifact() succeeds when the model triggers the tool call via runtime."""
+class TestGenerateArtifactCodeWorkflow:
+    """generate_artifact() routes deliverable requests to CodeArtifactWorkflow."""
 
-    def test_runtime_tool_call_path(self, tmp_path: Path):
-        """When the provider returns a tool_call, the runtime executes it and
-        generate_artifact extracts the result from AgentState."""
-        doc_tool = FakeArtifactTool("document.create")
-
-        # Provider returns a tool call that the runtime loop will execute.
-        provider = StubProvider(
-            content="",
-            tool_calls=[
-                ToolCall(
-                    name="document.create",
-                    arguments={
-                        "subject": "Safety Audit",
-                        "purpose": "Quarterly review",
-                        "recommendation": "Approve",
-                        "requested_approval": "Plant Manager",
-                    },
-                ),
-            ],
+    def test_generate_docx_artifact(self, tmp_path: Path):
+        code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.add_heading('Safety Audit Report', 0)\n"
+            "doc.add_paragraph('All equipment passed inspection.')\n"
+            "doc.save('report.docx')\n"
         )
-        agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
+        provider = StubProvider(content=f"```python\n{code}```")
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
             agent.generate_artifact(
@@ -268,106 +250,88 @@ class TestGenerateArtifactHappyPath:
         )
 
         assert isinstance(result, ArtifactGenerationResult)
-        assert result.artifact_type == "document"
-        # The runtime should have executed the tool at least once (the provider
-        # returns a tool_call, which the runtime loop picks up).  However, the
-        # StubProvider always returns the same response including tool_calls,
-        # so the runtime may loop.  Either way the orchestrator should return
-        # completed or failed gracefully.
-        assert result.status in {"completed", "failed"}
-        assert result.task_id  # non-empty UUID
-
-    def test_manual_json_content_path(self, tmp_path: Path):
-        """When the provider returns JSON content (no structured tool_call), the
-        orchestrator parses it and calls the tool manually."""
-        doc_tool = FakeArtifactTool("document.create")
-        json_content = json.dumps({
-            "subject": "Pump Inspection",
-            "purpose": "Annual review",
-            "recommendation": "Replace seals",
-            "requested_approval": "Maintenance Lead",
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
-
-        result = asyncio.run(
-            agent.generate_artifact(
-                "Generate a report on the pump inspection",
-                approved_tools={"document.create"},
-            )
-        )
-
-        assert isinstance(result, ArtifactGenerationResult)
-        assert result.artifact_type == "document"
+        assert result.artifact_type == "docx"
         assert result.status == "completed"
         assert result.path is not None
-        assert result.download_url is not None
-        assert "/download" in result.download_url
-        assert result.artifact_metadata.get("task_id") is not None
-        assert doc_tool.call_count >= 1
+        assert result.generation_mode == "code"
+        assert Path(result.path).exists()
+        assert result.task_id
 
-    def test_presentation_artifact(self, tmp_path: Path):
-        """Presentation artifact via keyword detection."""
-        pres_tool = FakeArtifactTool("presentation.create")
-        json_content = json.dumps({
-            "title": "Q3 Safety Review",
-            "slides": [{"layout": "title", "title": "Overview"}],
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"presentation.create": pres_tool})
+    def test_generate_presentation_artifact(self, tmp_path: Path):
+        code = (
+            "from pptx import Presentation\n"
+            "prs = Presentation()\n"
+            "slide = prs.slides.add_slide(prs.slide_layouts[0])\n"
+            "slide.shapes.title.text = 'Q3 Safety Review'\n"
+            "prs.save('presentation.pptx')\n"
+        )
+        provider = StubProvider(content=f"```python\n{code}```")
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
             agent.generate_artifact(
                 "Create a presentation about Q3 safety",
-                approved_tools={"presentation.create"},
+                task_type="presentation",
             )
         )
 
-        assert result.artifact_type == "presentation"
+        assert isinstance(result, ArtifactGenerationResult)
+        assert result.artifact_type == "pptx"
         assert result.status == "completed"
-        assert pres_tool.call_count >= 1
+        assert result.path is not None
+        assert result.generation_mode == "code"
+        assert Path(result.path).exists()
 
-    def test_spreadsheet_artifact(self, tmp_path: Path):
-        """Spreadsheet artifact via keyword detection."""
-        xl_tool = FakeArtifactTool("spreadsheet.create")
-        json_content = json.dumps({
-            "title": "Readings",
-            "sheets": [{"title": "Data", "columns": [{"key": "temp", "header": "Temperature"}]}],
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"spreadsheet.create": xl_tool})
+    def test_generate_spreadsheet_artifact(self, tmp_path: Path):
+        code = (
+            "import openpyxl\n"
+            "wb = openpyxl.Workbook()\n"
+            "ws = wb.active\n"
+            "ws['A1'] = 'Sensor'\n"
+            "ws['B1'] = 'Reading'\n"
+            "ws['A2'] = 'Temp'\n"
+            "ws['B2'] = 72\n"
+            "wb.save('readings.xlsx')\n"
+        )
+        provider = StubProvider(content=f"```python\n{code}```")
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
             agent.generate_artifact(
                 "Generate a spreadsheet with sensor readings",
-                approved_tools={"spreadsheet.create"},
             )
         )
 
-        assert result.artifact_type == "spreadsheet"
+        assert isinstance(result, ArtifactGenerationResult)
+        assert result.artifact_type == "xlsx"
         assert result.status == "completed"
+        assert result.path is not None
+        assert result.generation_mode == "code"
+        assert Path(result.path).exists()
 
-    def test_pdf_artifact(self, tmp_path: Path):
-        """PDF artifact via keyword detection."""
-        pdf_tool = FakeArtifactTool("pdf.create")
-        json_content = json.dumps({
-            "subject": "Valve Inspection",
-            "purpose": "Annual check",
-            "recommendation": "Pass",
-            "requested_approval": "QA Manager",
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"pdf.create": pdf_tool})
+    def test_generate_pdf_artifact(self, tmp_path: Path):
+        code = (
+            "from reportlab.platypus import SimpleDocTemplate, Paragraph\n"
+            "from reportlab.lib.styles import getSampleStyleSheet\n"
+            "doc = SimpleDocTemplate('report.pdf')\n"
+            "styles = getSampleStyleSheet()\n"
+            "doc.build([Paragraph('Valve Inspection Audit', styles['Title'])])\n"
+        )
+        provider = StubProvider(content=f"```python\n{code}```")
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
             agent.generate_artifact(
                 "Create a pdf report on valve inspection",
-                approved_tools={"pdf.create"},
             )
         )
 
+        assert isinstance(result, ArtifactGenerationResult)
         assert result.artifact_type == "pdf"
         assert result.status == "completed"
+        assert result.path is not None
+        assert result.generation_mode == "code"
+        assert Path(result.path).exists()
 
 
 # ===========================================================================
@@ -376,7 +340,7 @@ class TestGenerateArtifactHappyPath:
 
 
 class TestGenerateArtifactFailures:
-    """Verify that all failure modes return a proper ArtifactGenerationResult."""
+    """Verify failure modes in code artifact generation return structured results."""
 
     def test_no_artifact_intent(self, tmp_path: Path):
         """Request that is not artifact-related returns status=failed."""
@@ -391,84 +355,28 @@ class TestGenerateArtifactFailures:
         assert result.artifact_type == "unknown"
         assert any("Could not determine" in e for e in result.errors)
 
-    def test_tool_not_registered(self, tmp_path: Path):
-        """When the detected tool is not in the registry, returns failed."""
-        provider = StubProvider(content="ok")
-        models_config = _models_yaml(tmp_path)
-        registry = ModelRegistry(models_config)
-        providers = ModelProviderRegistry({"stub": provider})
-        runtime = AgentRuntime(ModelRouter(registry), providers)
-
-        tools = ToolRegistry()
-        # Deliberately omit document.create — but we need the config to not
-        # reference it either, so build with a minimal config.
-        config = IndustrialWorkbenchAgentConfig(tools=None)
-        agent = IndustrialWorkbenchAgent(runtime, tools, config)
-
-        result = asyncio.run(
-            agent.generate_artifact(
-                "Generate a report on equipment status",
-                task_type="report",
-            )
-        )
-
-        assert result.status == "failed"
-        assert any("not registered" in e for e in result.errors)
-
-    def test_tool_execution_failure(self, tmp_path: Path):
-        """When the artifact tool returns success=False, result reflects failure."""
-        doc_tool = FakeArtifactTool("document.create", succeed=False)
-        json_content = json.dumps({
-            "subject": "Test",
-            "purpose": "Test",
-            "recommendation": "Test",
-            "requested_approval": "Test",
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
+    def test_code_execution_failure(self, tmp_path: Path):
+        """When the generated code fails execution across retries, result is failed."""
+        code = "raise RuntimeError('Script execution failure')"
+        provider = StubProvider(content=f"```python\n{code}```")
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
             agent.generate_artifact(
                 "Generate a report on the test",
                 task_type="report",
-                approved_tools={"document.create"},
             )
         )
 
         assert result.status == "failed"
-        assert any("disk full" in e for e in result.errors)
-        assert result.path is None
-
-    def test_model_returns_non_json(self, tmp_path: Path):
-        """When the model produces plain text instead of JSON, the tool cannot be called."""
-        provider = StubProvider(content="Here is a nice summary of the findings.")
-        agent = _build_agent(tmp_path, provider)
-
-        result = asyncio.run(
-            agent.generate_artifact("Generate a report on the findings", task_type="report")
-        )
-
-        assert result.status == "failed"
-        assert any("did not produce valid" in e for e in result.errors)
+        assert result.artifact_type == "docx"
+        assert result.generation_mode == "code"
+        assert len(result.errors) >= 1
 
     def test_model_generation_exception(self, tmp_path: Path):
         """When model generation raises, generate_artifact catches and returns failed."""
         provider = FailingProvider()
-        # Build agent manually since FailingProvider will fail during agent.run
-        models_config = _models_yaml(tmp_path)
-        registry = ModelRegistry(models_config)
-        providers = ModelProviderRegistry({"stub": provider})
-        runtime = AgentRuntime(ModelRouter(registry), providers)
-
-        tools = ToolRegistry()
-        for name in (
-            "rag.search", "vision.analyze", "document.create",
-            "presentation.create", "pdf.create", "spreadsheet.create",
-            "artifact.validate", "sandbox.execute",
-        ):
-            tools.register(NamedTool(name))
-
-        agent = IndustrialWorkbenchAgent.create(runtime, tools, _agents_yaml())
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
             agent.generate_artifact("Generate a report", task_type="report")
@@ -487,7 +395,7 @@ class TestArtifactGenerationResult:
     """Verify the Pydantic schema behaves correctly."""
 
     def test_minimal_valid(self):
-        r = ArtifactGenerationResult(task_id="t1", artifact_type="document", status="completed")
+        r = ArtifactGenerationResult(task_id="t1", artifact_type="docx", status="completed")
         assert r.path is None
         assert r.download_url is None
         assert r.artifact_metadata == {}
@@ -508,7 +416,7 @@ class TestArtifactGenerationResult:
     def test_serialization_roundtrip(self):
         r = ArtifactGenerationResult(
             task_id="t3",
-            artifact_type="spreadsheet",
+            artifact_type="xlsx",
             status="failed",
             errors=["disk full"],
         )
@@ -518,103 +426,81 @@ class TestArtifactGenerationResult:
 
 
 # ===========================================================================
-# 5. Task type routing tests
+# 5. Multi-attempt repair loop tests
 # ===========================================================================
 
 
-class TestTaskTypeRouting:
-    """Verify that task_type correctly routes to the right artifact tool."""
+class MultiAttemptRepairProvider(ModelProvider):
+    """Provider that yields bad code on attempt 1 and working code on attempt 2."""
 
-    def test_report_routes_to_document(self, tmp_path: Path):
-        doc_tool = FakeArtifactTool("document.create")
-        json_content = json.dumps({
-            "subject": "X", "purpose": "Y",
-            "recommendation": "Z", "requested_approval": "W",
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"document.create": doc_tool})
+    def __init__(self, bad_code: str, good_code: str):
+        self.bad_code = bad_code
+        self.good_code = good_code
+        self.prompts: list[str] = []
+
+    async def generate(self, model: ModelDefinition, request: Any) -> ModelResponse:
+        self.prompts.append(request.prompt)
+        if len(self.prompts) == 1:
+            return ModelResponse(
+                content=f"```python\n{self.bad_code}\n```",
+                model_id=model.id,
+            )
+        return ModelResponse(
+            content=f"```python\n{self.good_code}\n```",
+            model_id=model.id,
+        )
+
+
+class TestCodeArtifactWorkflowRepair:
+    """Verify that CodeArtifactWorkflow feeds errors and validation back into repair attempts."""
+
+    def test_workflow_repairs_after_runtime_error(self, tmp_path: Path):
+        bad_code = "raise ValueError('Initial code buggy')"
+        good_code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.add_heading('Repaired Report', 0)\n"
+            "doc.add_paragraph('Successfully generated on attempt 2.')\n"
+            "doc.save('report.docx')\n"
+        )
+        provider = MultiAttemptRepairProvider(bad_code=bad_code, good_code=good_code)
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
-            agent.generate_artifact(
-                "summarize findings",
-                task_type="report",
-                approved_tools={"document.create"},
-            )
+            agent.generate_artifact("Generate an audit report", task_type="report")
         )
 
-        assert result.artifact_type == "document"
-        assert doc_tool.call_count >= 1
+        assert result.status == "completed"
+        assert result.artifact_type == "docx"
+        assert Path(result.path).exists()
+        assert len(provider.prompts) == 2
+        # Verify the repair prompt received the error traceback / feedback
+        assert "PREVIOUS ATTEMPT FAILED" in provider.prompts[1]
+        assert "Initial code buggy" in provider.prompts[1]
+        assert "REPAIR INSTRUCTIONS" in provider.prompts[1]
 
-    def test_artifact_with_presentation_keyword(self, tmp_path: Path):
-        pres_tool = FakeArtifactTool("presentation.create")
-        json_content = json.dumps({
-            "title": "Overview", "slides": [{"layout": "title", "title": "Hi"}],
-        })
-        provider = StubProvider(content=json_content)
-        agent = _build_agent(tmp_path, provider, extra_tools={"presentation.create": pres_tool})
+    def test_workflow_repairs_after_validation_failure(self, tmp_path: Path):
+        """Attempt 1 creates an empty document; attempt 2 adds required content."""
+        empty_code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.save('report.docx')\n"
+        )
+        good_code = (
+            "from docx import Document\n"
+            "doc = Document()\n"
+            "doc.add_paragraph('Non-empty content is now provided.')\n"
+            "doc.save('report.docx')\n"
+        )
+        provider = MultiAttemptRepairProvider(bad_code=empty_code, good_code=good_code)
+        agent = _build_agent(tmp_path, provider)
 
         result = asyncio.run(
-            agent.generate_artifact(
-                "create a presentation deck about maintenance",
-                task_type="artifact",
-                approved_tools={"presentation.create"},
-            )
+            agent.generate_artifact("Generate a document", task_type="report")
         )
 
-        assert result.artifact_type == "presentation"
-        assert pres_tool.call_count >= 1
+        assert result.status == "completed"
+        assert len(provider.prompts) == 2
+        assert "PREVIOUS ATTEMPT FAILED" in provider.prompts[1]
+        assert "Artifact has no readable content" in provider.prompts[1]
 
-
-# ===========================================================================
-# 6. Internal helper tests
-# ===========================================================================
-
-
-class TestExtractToolArguments:
-    """Test the static _extract_tool_arguments helper on IndustrialWorkbenchAgent."""
-
-    def test_from_structured_tool_calls(self):
-        resp = ModelResponse(
-            content="",
-            model_id="test",
-            tool_calls=[ToolCall(name="document.create", arguments={"subject": "X"})],
-        )
-        args = IndustrialWorkbenchAgent._extract_tool_arguments(resp, "document.create")
-        assert args == {"subject": "X"}
-
-    def test_from_raw_tool_calls(self):
-        resp = ModelResponse(
-            content="",
-            model_id="test",
-            raw={"tool_calls": [{"name": "pdf.create", "arguments": {"subject": "Y"}}]},
-        )
-        args = IndustrialWorkbenchAgent._extract_tool_arguments(resp, "pdf.create")
-        assert args == {"subject": "Y"}
-
-    def test_from_json_content(self):
-        resp = ModelResponse(
-            content=json.dumps({"title": "Report", "sheets": []}),
-            model_id="test",
-        )
-        args = IndustrialWorkbenchAgent._extract_tool_arguments(resp, "spreadsheet.create")
-        assert args == {"title": "Report", "sheets": []}
-
-    def test_from_json_content_with_tool_calls_wrapper(self):
-        resp = ModelResponse(
-            content=json.dumps({
-                "tool_calls": [
-                    {"name": "document.create", "arguments": {"subject": "Z"}}
-                ]
-            }),
-            model_id="test",
-        )
-        args = IndustrialWorkbenchAgent._extract_tool_arguments(resp, "document.create")
-        assert args == {"subject": "Z"}
-
-    def test_no_match_returns_none(self):
-        resp = ModelResponse(content="just text", model_id="test")
-        assert IndustrialWorkbenchAgent._extract_tool_arguments(resp, "document.create") is None
-
-    def test_empty_content_returns_none(self):
-        resp = ModelResponse(content="", model_id="test")
-        assert IndustrialWorkbenchAgent._extract_tool_arguments(resp, "document.create") is None
