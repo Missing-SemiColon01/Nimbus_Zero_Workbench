@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from backend.artifacts.contracts import Artifact, artifact_from_path
 from backend.artifacts.office_validator import OfficeArtifactValidator
@@ -18,7 +18,9 @@ from backend.models.providers import ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter, NoCompatibleModelError
 from backend.sandbox.coding_workflow import extract_python_code
 from backend.tools.registry import ToolRegistry
-from backend.agents.events import AgentEventStreamer
+
+if TYPE_CHECKING:
+    from backend.agents.events import AgentEventStreamer
 
 logger = logging.getLogger(__name__)
 
