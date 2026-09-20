@@ -17,7 +17,7 @@ from backend.agents.state import (
     WorkflowTimeoutError,
     validate_state,
 )
-from backend.models.contracts import ModelRequest, ModelResponse, ToolCall, ToolExecutionResult
+from backend.models.contracts import ChatMessage, ModelRequest, ModelResponse, ToolCall, ToolExecutionResult
 from backend.models.providers import ModelProviderRegistry, ProviderError, ProviderRequestError
 from backend.models.router import ModelRouter
 from backend.security.policy import PolicyDecision, PolicyEngine
@@ -60,7 +60,7 @@ class AgentGraphState(TypedDict):
     user_prompt: str
     system_prompt: str | None
     selected_model: str | None
-    messages: list[str]
+    messages: list[ChatMessage]
     images: list[str]
     documents: list[str]
     final_response: str | None
@@ -116,6 +116,7 @@ class AgentRuntime:
         user_request: str,
         capabilities: set[str],
         modality: str = "text",
+        *,
         task_id: str | None = None,
         timeout: float | None = None,
         max_retries: int | None = None,
@@ -126,11 +127,16 @@ class AgentRuntime:
         documents: list[str] | None = None,
         system_prompt: str | None = None,
         streamer: AgentEventStreamer | None = None,
+        messages: list[ChatMessage] | None = None,
+        session_id: str | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         """Run the agent workflow for one task with reliability controls."""
         start_time = time.perf_counter()
         resolved_task_id = task_id or str(uuid.uuid4())
-        initial_messages = [user_request] if isinstance(user_request, str) and user_request.strip() else []
+        user_msg = ChatMessage(role="user", content=user_request) if user_request.strip() else None
+        initial_messages: list[ChatMessage] = list(messages or [])
+        if user_msg is not None:
+            initial_messages.append(user_msg)
         resolved_images = self._validate_attachments(images, "images")
         resolved_documents = self._validate_attachments(documents, "documents")
         resolved_capabilities = set(capabilities)
@@ -157,6 +163,7 @@ class AgentRuntime:
             streamer.emit_task_init(
                 task_id=resolved_task_id,
                 capabilities=sorted(resolved_capabilities),
+                session_id=session_id,
             )
             streamer.emit_thought("Validating request and routing to best available model...")
 
@@ -205,12 +212,13 @@ class AgentRuntime:
             execution_duration = round(time.perf_counter() - start_time, 4)
             error_msg = f"Task execution timed out after {effective_timeout}s"
             predictable_content = f"Model generation failed: {error_msg}"
+            error_msg_chat = ChatMessage(role="assistant", content=predictable_content)
             state = AgentState(
                 task_id=resolved_task_id,
                 user_request=user_request,
                 user_prompt=user_request,
                 plan=["generate_response"],
-                messages=[*initial_messages, predictable_content],
+                messages=[*initial_messages, error_msg_chat],
                 images=resolved_images,
                 documents=resolved_documents,
                 selected_model=None,
@@ -233,12 +241,13 @@ class AgentRuntime:
             execution_duration = round(time.perf_counter() - start_time, 4)
             error_msg = str(exc)
             predictable_content = f"Model generation failed: {error_msg}"
+            error_msg_chat = ChatMessage(role="assistant", content=predictable_content)
             state = AgentState(
                 task_id=resolved_task_id,
                 user_request=user_request,
                 user_prompt=user_request,
                 plan=["generate_response"],
-                messages=[*initial_messages, predictable_content],
+                messages=[*initial_messages, error_msg_chat],
                 images=resolved_images,
                 documents=resolved_documents,
                 selected_model=None,
@@ -261,12 +270,13 @@ class AgentRuntime:
             execution_duration = round(time.perf_counter() - start_time, 4)
             error_msg = str(exc)
             predictable_content = f"Model generation failed: {error_msg}"
+            error_msg_chat = ChatMessage(role="assistant", content=predictable_content)
             state = AgentState(
                 task_id=resolved_task_id,
                 user_request=user_request,
                 user_prompt=user_request,
                 plan=["generate_response"],
-                messages=[*initial_messages, predictable_content],
+                messages=[*initial_messages, error_msg_chat],
                 images=resolved_images,
                 documents=resolved_documents,
                 selected_model=None,
@@ -396,6 +406,7 @@ class AgentRuntime:
 
         model_request = ModelRequest(
             prompt=self._model_prompt(state),
+            messages=self._build_request_messages(state),
             required_capabilities=state["required_capabilities"],
             required_modality=state["modality"],
             images=state.get("images", []),
@@ -423,7 +434,38 @@ class AgentRuntime:
 
             attempted_models.append(model.id)
             try:
-                response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
+                if streamer is not None:
+                    # Stream tokens directly to SSE
+                    async for token in self.providers.stream_generate(model, model_request):
+                        streamer.emit_content_delta(token)
+                    # After streaming, if tools are configured, call generate once to detect tool calls
+                    if model_request.tools:
+                        response = await self.providers.generate(model, model_request)
+                    else:
+                        # No tools needed, collect streamed content
+                        accumulated = ""
+                        async for token in self.providers.stream_generate(model, model_request):
+                            accumulated += token
+                        response = ModelResponse(content=accumulated, model_id=model.id)
+                else:
+                    response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
+                    final_content = response.content.strip() or "Task execution completed."
+                    return {
+                        "selected_model": model.id,
+                        "provider": model.runtime,
+                        "fallback_used": len(attempted_models) > 1,
+                        "attempted_models": attempted_models,
+                        "messages": [*state["messages"], ChatMessage(role="assistant", content=final_content)],
+                        "final_response": final_content,
+                        "errors": errors,
+                        "model_response": response,
+                        "tool_results": tool_results,
+                        "approval_required": bool(approval_requests),
+                        "approval_requests": approval_requests,
+                        "status": "awaiting_approval" if approval_requests else "completed",
+                        "step_count": step_count,
+                        "node_history": node_history,
+                    }
             except ProviderRequestError:
                 # A malformed request must not be retried against another model.
                 raise
@@ -432,23 +474,45 @@ class AgentRuntime:
                 errors.append(str(error))
                 continue
 
-            final_content = response.content.strip() or "Task execution completed."
-            return {
-                "selected_model": model.id,
-                "provider": model.runtime,
-                "fallback_used": len(attempted_models) > 1,
-                "attempted_models": attempted_models,
-                "messages": [*state["messages"], final_content],
-                "final_response": final_content,
-                "errors": errors,
-                "model_response": response,
-                "tool_results": tool_results,
-                "approval_required": bool(approval_requests),
-                "approval_requests": approval_requests,
-                "status": "awaiting_approval" if approval_requests else "completed",
-                "step_count": step_count,
-                "node_history": node_history,
-            }
+            # For streaming path without tools, we need to handle the response
+            if streamer is not None and not model_request.tools:
+                final_content = response.content.strip() or "Task execution completed."
+                return {
+                    "selected_model": model.id,
+                    "provider": model.runtime,
+                    "fallback_used": len(attempted_models) > 1,
+                    "attempted_models": attempted_models,
+                    "messages": [*state["messages"], ChatMessage(role="assistant", content=final_content)],
+                    "final_response": final_content,
+                    "errors": errors,
+                    "model_response": response,
+                    "tool_results": [],
+                    "approval_required": False,
+                    "approval_requests": [],
+                    "status": "completed",
+                    "step_count": step_count,
+                    "node_history": node_history,
+                }
+            elif streamer is not None and model_request.tools:
+                # Tools case: fall through to _generate_with_tools
+                response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
+                final_content = response.content.strip() or "Task execution completed."
+                return {
+                    "selected_model": model.id,
+                    "provider": model.runtime,
+                    "fallback_used": len(attempted_models) > 1,
+                    "attempted_models": attempted_models,
+                    "messages": [*state["messages"], ChatMessage(role="assistant", content=final_content)],
+                    "final_response": final_content,
+                    "errors": errors,
+                    "model_response": response,
+                    "tool_results": tool_results,
+                    "approval_required": bool(approval_requests),
+                    "approval_requests": approval_requests,
+                    "status": "awaiting_approval" if approval_requests else "completed",
+                    "step_count": step_count,
+                    "node_history": node_history,
+                }
 
         # If all candidates fail or retry limit reached:
         # Capture errors in the errors field and return a predictable failure response
@@ -466,7 +530,7 @@ class AgentRuntime:
             "provider": None,
             "fallback_used": fallback_used,
             "attempted_models": attempted_models,
-            "messages": [*state["messages"], predictable_response],
+            "messages": [*state["messages"], ChatMessage(role="assistant", content=predictable_response)],
             "final_response": predictable_response,
             "errors": errors,
             "model_response": model_response,
@@ -474,6 +538,14 @@ class AgentRuntime:
             "step_count": step_count,
             "node_history": node_history,
         }
+
+    @staticmethod
+    def _build_request_messages(state: AgentGraphState) -> list[ChatMessage]:
+        """Convert graph state messages to ModelRequest ChatMessage list."""
+        msgs = state.get("messages", [])
+        if not msgs:
+            return []
+        return msgs if all(isinstance(m, ChatMessage) for m in msgs) else []
 
     async def _generate_with_tools(
         self,
@@ -500,6 +572,7 @@ class AgentRuntime:
             )
             request = ModelRequest(
                 prompt=self._prompt_with_tool_results(self._model_prompt(state), response, round_results),
+                messages=self._build_request_messages(state),
                 required_capabilities=initial_request.required_capabilities,
                 required_modality=initial_request.required_modality,
                 images=initial_request.images,

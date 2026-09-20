@@ -43,6 +43,7 @@ class TaskInitPayload:
     model: str | None = None
     intent: str | None = None
     capabilities: list[str] = field(default_factory=list)
+    session_id: str | None = None
 
 
 @dataclass
@@ -159,12 +160,14 @@ class AgentEventStreamer:
         model: str | None = None,
         intent: str | None = None,
         capabilities: list[str] | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._put("task_init", TaskInitPayload(
             task_id=task_id,
             model=model,
             intent=intent,
             capabilities=capabilities or [],
+            session_id=session_id,
         ))
 
     def emit_thought(self, text: str, phase: str = "reasoning") -> None:

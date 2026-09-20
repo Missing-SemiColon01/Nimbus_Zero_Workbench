@@ -18,7 +18,7 @@ from backend.artifacts.code_workflow import CodeArtifactWorkflow
 from backend.agents.runtime import AgentRuntime, RuntimeConfig
 from backend.agents.state import AgentState
 from backend.agents.events import AgentEventStreamer
-from backend.models.contracts import ModelResponse
+from backend.models.contracts import ChatMessage, ModelResponse
 from backend.schemas.artifact_result import ArtifactGenerationResult
 from backend.tools.registry import ToolRegistry
 
@@ -196,6 +196,8 @@ class IndustrialWorkbenchAgent:
         documents: list[str] | None = None,
         approved_tools: set[str] | None = None,
         streamer: AgentEventStreamer | None = None,
+        messages: list[ChatMessage] | None = None,
+        session_id: str | None = None,
     ) -> tuple[AgentState, ModelResponse]:
         return await self.runtime.run(
             user_request,
@@ -208,6 +210,31 @@ class IndustrialWorkbenchAgent:
             documents=documents,
             system_prompt=self.config.system_prompt,
             streamer=streamer,
+            messages=messages,
+            session_id=session_id,
+        )
+
+    async def chat(
+        self,
+        user_request: str,
+        *,
+        capabilities: set[str] | None = None,
+        messages: list[ChatMessage] | None = None,
+        tool_ids: str | None = None,
+        streamer: AgentEventStreamer | None = None,
+        session_id: str | None = None,
+        **kwargs,
+    ) -> tuple[AgentState, ModelResponse]:
+        """Conversational turn: run the agent without artifact-generation routing."""
+        caps = capabilities or {"reasoning"}
+        return await self.run(
+            user_request,
+            caps,
+            modality="text",
+            messages=messages,
+            streamer=streamer,
+            session_id=session_id,
+            **kwargs,
         )
 
     # -- Artifact-generation orchestration -------------------------------------
@@ -220,6 +247,7 @@ class IndustrialWorkbenchAgent:
         approved_tools: set[str] | None = None,
         generation_mode: str = "auto",
         streamer: AgentEventStreamer | None = None,
+        session_id: str | None = None,
     ) -> ArtifactGenerationResult:
         """Detect, generate, and produce a downloadable artifact in one call."""
         task_id = str(uuid.uuid4())
@@ -227,6 +255,11 @@ class IndustrialWorkbenchAgent:
         # 1. Detect artifact intent.
         if streamer is not None:
             streamer.emit_thought("Detecting artifact type from request...")
+            streamer.emit_task_init(
+                task_id=task_id,
+                intent="artifact_generation",
+                session_id=session_id,
+            )
         intent = detect_artifact_intent(user_request, task_type)
         if intent is None:
             return ArtifactGenerationResult(
@@ -243,6 +276,7 @@ class IndustrialWorkbenchAgent:
             task_id=task_id,
             approved_tools=approved_tools,
             streamer=streamer,
+            session_id=session_id,
         )
 
     async def _generate_code_artifact(
@@ -252,6 +286,7 @@ class IndustrialWorkbenchAgent:
         task_id: str,
         approved_tools: set[str] | None = None,
         streamer: AgentEventStreamer | None = None,
+        session_id: str | None = None,
     ) -> ArtifactGenerationResult:
         """Generate artifact by writing Python code and executing inside the Docker sandbox."""
         tool_label = (

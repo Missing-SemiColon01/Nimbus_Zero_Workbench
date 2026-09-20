@@ -24,6 +24,7 @@ from backend.schemas.knowledge import (
 )
 from backend.schemas.sandbox import SandboxRunRequest, SandboxRunResponse
 from backend.schemas.tasks import TaskCreate, TaskResponse
+from backend.schemas.chat import ChatMessage
 from backend.agents.events import AgentEventStreamer
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ async def create_task(payload: TaskCreate, request: Request):
             task_type=payload.task_type,
             approved_tools=payload.approved_tools,
             generation_mode=payload.generation_mode,
+            session_id=payload.session_id,
         )
         return TaskResponse(
             task_id=result.task_id,
@@ -193,6 +195,8 @@ async def create_task(payload: TaskCreate, request: Request):
             images=payload.images,
             documents=documents,
             approved_tools=payload.approved_tools,
+            messages=payload.messages,
+            session_id=payload.session_id,
         )
     except NoCompatibleModelError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -256,6 +260,7 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                     approved_tools=payload.approved_tools,
                     generation_mode=payload.generation_mode,
                     streamer=streamer,
+                    session_id=payload.session_id,
                 )
             else:
                 uploads_dir: Path = settings.data_dir / "uploads"
@@ -276,16 +281,9 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                     documents=documents,
                     approved_tools=payload.approved_tools,
                     streamer=streamer,
+                    messages=payload.messages,
+                    session_id=payload.session_id,
                 )
-
-                # Stream the final response as content_delta chunks
-                if state.final_response or model_response.content:
-                    final_text = state.final_response or model_response.content
-                    # Emit in ~30-char chunks for smooth visual streaming
-                    chunk_size = 30
-                    for i in range(0, len(final_text), chunk_size):
-                        streamer.emit_content_delta(final_text[i:i + chunk_size])
-                        await asyncio.sleep(0)  # yield to event loop between chunks
 
                 streamer.emit_task_complete(
                     task_id=state.task_id,

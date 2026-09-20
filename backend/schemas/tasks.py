@@ -3,6 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from backend.schemas.artifacts import ArtifactInfo
+from backend.schemas.chat import ChatMessage
 
 
 TASK_TYPE_CAPABILITIES: dict[str, set[str]] = {
@@ -40,6 +41,8 @@ class TaskCreate(BaseModel):
         default="auto",
         description="Artifact generation strategy: 'auto' (detect from request), 'structured', or 'code'.",
     )
+    messages: list[ChatMessage] = Field(default_factory=list)
+    session_id: str | None = None
 
     @property
     def required_capabilities(self) -> set[str]:
