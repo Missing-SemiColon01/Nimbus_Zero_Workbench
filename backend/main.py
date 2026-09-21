@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.agents.industrial_workbench import IndustrialWorkbenchAgent
 from backend.agents.runtime import AgentRuntime
 from backend.api.routes import router
+from backend.api.auth import router as auth_router
 from backend.core.config import get_settings
+from backend.core.database import close_mongo, init_mongo
 from backend.knowledge.retriever import reset_retriever
 from backend.models.providers import ModelProviderRegistry, OllamaProvider
 from backend.models.registry import ModelRegistry
@@ -37,9 +39,12 @@ async def lifespan(app: FastAPI):
         app.state.tools,
         settings.agents_config,
     )
+    # Initialize MongoDB connection pool (if MONGODB_URI is provided)
+    await init_mongo(settings)
     try:
         yield
     finally:
+        await close_mongo()
         reset_retriever()
 
 
@@ -55,3 +60,5 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

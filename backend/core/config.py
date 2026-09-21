@@ -18,7 +18,15 @@ class Settings(BaseSettings):
     sandbox_cpu_quota: int = 50_000
     sandbox_max_retries: int = 3
     cors_origins: list[str] = ["*"]
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # ── Database & Authentication ─────────────────────────────────────────────
+    mongodb_uri: str | None = None
+    mongodb_db_name: str = "sovereign_workbench"
+    jwt_secret: str = "sovereign-workbench-default-secret-key-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 10080  # 7 days
+
+    model_config = SettingsConfigDict(env_file=(".env.local", ".env"), extra="ignore")
 
 
 @lru_cache
