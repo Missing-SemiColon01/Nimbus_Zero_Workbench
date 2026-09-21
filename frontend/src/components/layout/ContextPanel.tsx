@@ -218,7 +218,7 @@ export function ContextPanel({
   )
 }
 
-function Section({ title, children }: { title: string children: ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="px-4 py-3 border-b border-[var(--border-color)]">
       <div className="text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase mb-2">

@@ -17,6 +17,7 @@ import type {
 interface ChatProps {
   session: Session | null
   onAddMessage: (sessionId: string, message: Message) => void
+  onAddMessages?: (sessionId: string, messages: Message[]) => void
   onUpdateMessage: (
     sessionId: string,
     messageId: string,
@@ -51,7 +52,12 @@ const SUGGESTIONS = [
   },
 ]
 
-export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
+export function Chat({
+  session,
+  onAddMessage,
+  onAddMessages,
+  onUpdateMessage,
+}: ChatProps) {
   const [streaming, setStreaming] = useState(false)
   const [streamingId, setStreamingId] = useState<string | null>(null)
   const [streamContent, setStreamContent] = useState("")
@@ -106,6 +112,8 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
     async (content: string, attachments: Attachment[]) => {
       if (!session) return
 
+      const targetSessionId = session.id
+
       // Reset live step state
       stepsRef.current = []
       filesRef.current = []
@@ -119,7 +127,6 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
         timestamp: new Date(),
         attachments: attachments.length > 0 ? attachments : undefined,
       }
-      onAddMessage(session.id, userMsg)
 
       const aiMsgId = `msg-${Date.now() + 1}`
       const aiMsg: Message = {
@@ -128,7 +135,14 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
         content: "",
         timestamp: new Date(),
       }
-      onAddMessage(session.id, aiMsg)
+
+      if (onAddMessages) {
+        onAddMessages(targetSessionId, [userMsg, aiMsg])
+      } else {
+        onAddMessage(targetSessionId, userMsg)
+        onAddMessage(targetSessionId, aiMsg)
+      }
+
       setStreamingId(aiMsgId)
       setStreamContent("")
       setStreaming(true)
@@ -233,7 +247,7 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
             },
           },
           {
-            sessionId: session.id,
+            sessionId: targetSessionId,
             images: attachments
               .filter((a) => a.type === "image" && (a.dataUrl || a.url))
               .map((a) => a.dataUrl || a.url!),
@@ -243,24 +257,31 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
           },
         )
 
-        onUpdateMessage(session.id, aiMsgId, {
+        const finalSteps = stepsRef.current.map((s) =>
+          s.status === "active" ? { ...s, status: "done" as const } : s,
+        )
+
+        onUpdateMessage(targetSessionId, aiMsgId, {
           content: accumulated || "No response received from agent.",
-          agentSteps: stepsRef.current,
+          agentSteps: finalSteps.length > 0 ? finalSteps : undefined,
           generatedFiles:
             filesRef.current.length > 0 ? filesRef.current : undefined,
         })
       } catch (err: any) {
+        const finalSteps = stepsRef.current.map((s) =>
+          s.status === "active" ? { ...s, status: "done" as const } : s,
+        )
         if (!controller.signal.aborted) {
           const errorMsg =
             err?.message ||
             "Unable to connect to Sovereign backend at http://localhost:8000. Please ensure the backend is running."
-          onUpdateMessage(session.id, aiMsgId, {
+          onUpdateMessage(targetSessionId, aiMsgId, {
             content: accumulated || errorMsg,
             agentSteps:
-              stepsRef.current.length > 0 ? stepsRef.current : undefined,
+              finalSteps.length > 0 ? finalSteps : undefined,
           })
         } else {
-          onUpdateMessage(session.id, aiMsgId, { content: accumulated })
+          onUpdateMessage(targetSessionId, aiMsgId, { content: accumulated })
         }
       } finally {
         setStreaming(false)
@@ -273,6 +294,7 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
     [
       session,
       onAddMessage,
+      onAddMessages,
       onUpdateMessage,
       addStep,
       updateLastStep,

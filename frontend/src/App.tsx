@@ -47,6 +47,7 @@ function AppInner() {
     deleteSession,
     pinSession,
     addMessage,
+    addMessages,
     updateMessage,
     clearAllHistory,
   } = useSessions()
@@ -146,6 +147,7 @@ function AppInner() {
           <Chat
             session={activeSession}
             onAddMessage={addMessage}
+            onAddMessages={addMessages}
             onUpdateMessage={updateMessage}
           />
         )

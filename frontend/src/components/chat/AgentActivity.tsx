@@ -63,7 +63,7 @@ function toolShortName(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.split(".").pop() ?? tool
 }
 
-function ToolIcon({ tool, size = 11 }: { tool?: string size?: number }) {
+function ToolIcon({ tool, size = 11 }: { tool?: string; size?: number }) {
   const Icon = tool ? (TOOL_ICONS[tool] ?? Zap) : Cpu
   return <Icon size={size} />
 }

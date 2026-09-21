@@ -32,7 +32,7 @@ export interface AgentStreamState {
    */
   start(
     request: string,
-    options?: { task_type?: string images?: string[] documents?: string[] },
+    options?: { task_type?: string; images?: string[]; documents?: string[] },
     onDone?: (
       steps: AgentStep[],
       files: GeneratedFile[],
