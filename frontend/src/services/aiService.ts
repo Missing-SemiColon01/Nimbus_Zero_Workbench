@@ -1,6 +1,6 @@
-import type { Message, Attachment, AgentStep, GeneratedFile } from '../types';
-import { streamTask } from './sseClient';
-import { BACKEND_CONFIG } from './backendConfig';
+import type { Message, Attachment, AgentStep, GeneratedFile } from "../types"
+import { streamTask } from "./sseClient"
+import { BACKEND_CONFIG } from "./backendConfig"
 
 // ---------------------------------------------------------------------------
 // BACKEND HOOK
@@ -13,7 +13,7 @@ import { BACKEND_CONFIG } from './backendConfig';
 // Connect your backend: set VITE_API_BASE_URL=http://localhost:8000 in .env.local
 // ---------------------------------------------------------------------------
 
-const BACKEND_AVAILABLE = Boolean(BACKEND_CONFIG.baseUrl);
+const BACKEND_AVAILABLE = true
 
 // ---------------------------------------------------------------------------
 // Mock responses (used when backend is not configured)
@@ -158,49 +158,62 @@ The spreadsheet has been constructed with multi-sheet organization and dynamic f
 - Column Auto-Fitting: Widths adjusted to ensure clean visual readability
 
 The workbook is ready for financial and operational modeling.`,
-};
+}
 
-export function detectArtifactType(content: string): 'pptx' | 'docx' | 'xlsx' | 'pdf' | null {
-  const lower = content.toLowerCase();
-  if (/\b(presentation|slides?|deck|pptx|powerpoint)\b/.test(lower)) return 'pptx';
-  if (/\b(spreadsheet|excel|xlsx|workbook|sheets?)\b/.test(lower)) return 'xlsx';
-  if (/\b(docx?|word|doc|approval\s+note|memo|contract|sop)\b/.test(lower)) return 'docx';
-  if (/\b(pdf)\b/.test(lower)) return 'pdf';
-  if (/\b(report)\b/.test(lower)) return 'pdf';
-  return null;
+export function detectArtifactType(
+  content: string,
+): "pptx" | "docx" | "xlsx" | "pdf" | null {
+  const lower = content.toLowerCase()
+  if (/\b(presentation|slides?|deck|pptx|powerpoint)\b/.test(lower))
+    return "pptx"
+  if (/\b(spreadsheet|excel|xlsx|workbook|sheets?)\b/.test(lower)) return "xlsx"
+  if (/\b(docx?|word|doc|approval\s+note|memo|contract|sop)\b/.test(lower))
+    return "docx"
+  if (/\b(pdf)\b/.test(lower)) return "pdf"
+  if (/\b(report)\b/.test(lower)) return "pdf"
+  return null
 }
 
 function detectIntent(content: string, attachments?: Attachment[]): string {
-  const artifact = detectArtifactType(content);
-  if (artifact) return artifact;
-  const lower = content.toLowerCase();
-  if (attachments?.some(a => a.type === 'image')) return 'image';
-  if (attachments?.some(a => a.type === 'csv' || a.type === 'xlsx')) return 'sensor';
-  if (attachments?.some(a => a.type === 'pdf' || a.type === 'docx' || a.type === 'txt'))
-    return 'document';
+  const artifact = detectArtifactType(content)
+  if (artifact) return artifact
+  const lower = content.toLowerCase()
+  if (attachments?.some((a) => a.type === "image")) return "image"
+  if (attachments?.some((a) => a.type === "csv" || a.type === "xlsx"))
+    return "sensor"
   if (
-    lower.includes('sensor') ||
-    lower.includes('data') ||
-    lower.includes('pressure') ||
-    lower.includes('temperature')
+    attachments?.some(
+      (a) => a.type === "pdf" || a.type === "docx" || a.type === "txt",
+    )
   )
-    return 'sensor';
+    return "document"
   if (
-    lower.includes('document') ||
-    lower.includes('report') ||
-    lower.includes('manual') ||
-    lower.includes('compliance')
+    lower.includes("sensor") ||
+    lower.includes("data") ||
+    lower.includes("pressure") ||
+    lower.includes("temperature")
   )
-    return 'document';
-  if (lower.includes('image') || lower.includes('photo') || lower.includes('inspect'))
-    return 'image';
+    return "sensor"
   if (
-    lower.includes('generate') ||
-    lower.includes('create report') ||
-    lower.includes('summary')
+    lower.includes("document") ||
+    lower.includes("report") ||
+    lower.includes("manual") ||
+    lower.includes("compliance")
   )
-    return 'report';
-  return 'general';
+    return "document"
+  if (
+    lower.includes("image") ||
+    lower.includes("photo") ||
+    lower.includes("inspect")
+  )
+    return "image"
+  if (
+    lower.includes("generate") ||
+    lower.includes("create report") ||
+    lower.includes("summary")
+  )
+    return "report"
+  return "general"
 }
 
 // ---------------------------------------------------------------------------
@@ -208,13 +221,19 @@ function detectIntent(content: string, attachments?: Attachment[]): string {
 // ---------------------------------------------------------------------------
 
 export interface AgentEventCallbacks {
-  onThought?: (text: string, phase: string) => void;
-  onToolCallStart?: (tool: string, description: string) => void;
-  onToolCallLog?: (tool: string, line: string) => void;
-  onToolCallEnd?: (tool: string, success: boolean, duration_ms?: number) => void;
-  onArtifactReady?: (name: string, fileType: string, sizeBytes: number, downloadUrl: string, previewUrl?: string) => void;
-  onTaskComplete?: (durationMs: number, model?: string) => void;
-  onTaskError?: (error: string) => void;
+  onThought?: (text: string, phase: string) => void
+  onToolCallStart?: (tool: string, description: string) => void
+  onToolCallLog?: (tool: string, line: string) => void
+  onToolCallEnd?: (tool: string, success: boolean, duration_ms?: number) => void
+  onArtifactReady?: (
+    name: string,
+    fileType: string,
+    sizeBytes: number,
+    downloadUrl: string,
+    previewUrl?: string,
+  ) => void
+  onTaskComplete?: (durationMs: number, model?: string) => void
+  onTaskError?: (error: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +250,11 @@ export interface AgentEventCallbacks {
  * @param agentEvents   - Optional SSE agent event callbacks (real backend only)
  */
 export interface GenerateOptions {
-  sessionId?: string;
-  taskType?: string;
-  images?: string[];
-  documents?: string[];
-  documentPaths?: string[];
+  sessionId?: string
+  taskType?: string
+  images?: string[]
+  documents?: string[]
+  documentPaths?: string[]
 }
 
 export async function generateResponse(
@@ -245,14 +264,14 @@ export async function generateResponse(
   agentEvents?: AgentEventCallbacks,
   options?: GenerateOptions,
 ): Promise<void> {
-  const last = messages[messages.length - 1];
+  const last = messages[messages.length - 1]
 
   if (BACKEND_AVAILABLE) {
     // Format previous messages for conversation history
-    const formattedMessages = messages.map(m => ({
-      role: m.role as 'user' | 'assistant',
+    const formattedMessages = messages.map((m) => ({
+      role: m.role as "user" | "assistant",
       content: m.content,
-    }));
+    }))
 
     // --- Real backend SSE path ---
     await streamTask(
@@ -270,19 +289,23 @@ export async function generateResponse(
           /* task started */
         },
         onThought(text, phase) {
-          agentEvents?.onThought?.(text, phase);
+          agentEvents?.onThought?.(text, phase)
         },
         onToolCallStart(payload) {
-          agentEvents?.onToolCallStart?.(payload.tool, payload.description);
+          agentEvents?.onToolCallStart?.(payload.tool, payload.description)
         },
         onToolCallLog(tool, line) {
-          agentEvents?.onToolCallLog?.(tool, line);
+          agentEvents?.onToolCallLog?.(tool, line)
         },
         onToolCallEnd(payload) {
-          agentEvents?.onToolCallEnd?.(payload.tool, payload.success, payload.duration_ms);
+          agentEvents?.onToolCallEnd?.(
+            payload.tool,
+            payload.success,
+            payload.duration_ms,
+          )
         },
         onContentDelta(delta) {
-          onChunk(delta);
+          onChunk(delta)
         },
         onArtifactReady(payload) {
           agentEvents?.onArtifactReady?.(
@@ -291,36 +314,37 @@ export async function generateResponse(
             payload.size_bytes,
             payload.download_url,
             payload.preview_url,
-          );
+          )
         },
         onTaskComplete(payload) {
-          agentEvents?.onTaskComplete?.(payload.duration_ms, payload.model);
+          agentEvents?.onTaskComplete?.(payload.duration_ms, payload.model)
         },
         onTaskError(error) {
-          agentEvents?.onTaskError?.(error);
+          agentEvents?.onTaskError?.(error)
         },
       },
       signal,
-    );
-    return;
+    )
+    return
   }
 
   // --- Mock simulation (no backend configured) ---
-  const intent = detectIntent(last.content, last.attachments);
-  const fullResponse = RESPONSES[intent as keyof typeof RESPONSES] || RESPONSES.general;
+  const intent = detectIntent(last.content, last.attachments)
+  const fullResponse =
+    RESPONSES[(intent as keyof typeof RESPONSES)] || RESPONSES.general
 
   // ── Live mock agent events (simulate what the real backend would stream) ──
   if (agentEvents) {
-    await simulateMockAgentEvents(intent, last.content, agentEvents, signal);
-    if (signal?.aborted) return;
+    await simulateMockAgentEvents(intent, last.content, agentEvents, signal)
+    if (signal?.aborted) return
   }
 
   // ── Stream the final response word-by-word ────────────────────────────────
-  const words = fullResponse.split(' ');
+  const words = fullResponse.split(" ")
   for (let i = 0; i < words.length; i++) {
-    if (signal?.aborted) return;
-    await new Promise(r => setTimeout(r, 18 + Math.random() * 20));
-    onChunk((i === 0 ? '' : ' ') + words[i]);
+    if (signal?.aborted) return
+    await new Promise((r) => setTimeout(r, 18 + Math.random() * 20))
+    onChunk((i === 0 ? "" : " ") + words[i])
   }
 }
 
@@ -328,7 +352,7 @@ export async function generateResponse(
 // Mock agent event simulation — intent-specific live steps
 // ---------------------------------------------------------------------------
 
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 async function simulateMockAgentEvents(
   intent: string,
@@ -336,189 +360,377 @@ async function simulateMockAgentEvents(
   events: AgentEventCallbacks,
   signal?: AbortSignal,
 ): Promise<void> {
-  const check = () => signal?.aborted ?? false;
+  const check = () => signal?.aborted ?? false
 
   const docxSequence: Array<() => Promise<void>> = [
     async () => {
-      events.onThought?.('Analyzing document requirements, typography standards, and structural sections...', 'reasoning');
-      await sleep(380);
+      events.onThought?.(
+        "Analyzing document requirements, typography standards, and structural sections...",
+        "reasoning",
+      )
+      await sleep(380)
     },
     async () => {
-      events.onToolCallStart?.('python-docx', 'Authoring Word document (.docx)');
-      await sleep(180);
-      events.onToolCallLog?.('python-docx', 'Initializing Document with corporate letterhead geometry (Letter / 1" margins)');
-      await sleep(220);
-      events.onToolCallLog?.('python-docx', 'Configuring typography styles: Title (24pt bold), Heading 1 (16pt), Body (11pt Calibri)');
-      await sleep(200);
-      events.onToolCallLog?.('python-docx', 'Drafting Executive Summary & Project Scope section');
-      await sleep(220);
-      events.onToolCallLog?.('python-docx', 'Inserting structured findings table with bold headers, zebra striping & cell padding');
-      await sleep(240);
-      events.onToolCallLog?.('python-docx', 'Appending Risk Matrix, Actionable Recommendations & Sign-off block');
-      await sleep(180);
-      events.onToolCallLog?.('python-docx', 'Saved deliverable: technical_document.docx (384 KB)');
-      await sleep(160);
-      events.onToolCallEnd?.('python-docx', true, 1250);
+      events.onToolCallStart?.("python-docx", "Authoring Word document (.docx)")
+      await sleep(180)
+      events.onToolCallLog?.(
+        "python-docx",
+        'Initializing Document with corporate letterhead geometry (Letter / 1" margins)',
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "python-docx",
+        "Configuring typography styles: Title (24pt bold), Heading 1 (16pt), Body (11pt Calibri)",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "python-docx",
+        "Drafting Executive Summary & Project Scope section",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "python-docx",
+        "Inserting structured findings table with bold headers, zebra striping & cell padding",
+      )
+      await sleep(240)
+      events.onToolCallLog?.(
+        "python-docx",
+        "Appending Risk Matrix, Actionable Recommendations & Sign-off block",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "python-docx",
+        "Saved deliverable: technical_document.docx (384 KB)",
+      )
+      await sleep(160)
+      events.onToolCallEnd?.("python-docx", true, 1250)
     },
     async () => {
-      events.onThought?.('Validating OOXML document integrity, XML tag closure, and style consistency...', 'validation');
-      await sleep(280);
+      events.onThought?.(
+        "Validating OOXML document integrity, XML tag closure, and style consistency...",
+        "validation",
+      )
+      await sleep(280)
     },
     async () => {
-      events.onToolCallStart?.('artifact.validate', 'Validating Word document schema & style relationships');
-      await sleep(160);
-      events.onToolCallLog?.('artifact.validate', 'Parsing word/document.xml and word/styles.xml');
-      await sleep(180);
-      events.onToolCallLog?.('artifact.validate', 'Auditing table column widths, cell borders, and paragraph spacing');
-      await sleep(160);
-      events.onToolCallLog?.('artifact.validate', 'Verification passed: 100% compliant OpenXML document');
-      await sleep(140);
-      events.onToolCallEnd?.('artifact.validate', true, 640);
+      events.onToolCallStart?.(
+        "artifact.validate",
+        "Validating Word document schema & style relationships",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Parsing word/document.xml and word/styles.xml",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Auditing table column widths, cell borders, and paragraph spacing",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Verification passed: 100% compliant OpenXML document",
+      )
+      await sleep(140)
+      events.onToolCallEnd?.("artifact.validate", true, 640)
     },
     async () => {
-      events.onArtifactReady?.('technical_document.docx', 'docx', 393216, '/api/v1/artifacts/technical_document.docx/download');
-      await sleep(100);
+      events.onArtifactReady?.(
+        "technical_document.docx",
+        "docx",
+        393216,
+        "/api/v1/artifacts/technical_document.docx/download",
+      )
+      await sleep(100)
     },
-  ];
+  ]
 
   const pptxSequence: Array<() => Promise<void>> = [
     async () => {
-      events.onThought?.('Analyzing presentation narrative, slide layout rhythm, and design theme...', 'reasoning');
-      await sleep(380);
+      events.onThought?.(
+        "Analyzing presentation narrative, slide layout rhythm, and design theme...",
+        "reasoning",
+      )
+      await sleep(380)
     },
     async () => {
-      events.onToolCallStart?.('python-pptx', 'Generating PowerPoint presentation (.pptx)');
-      await sleep(180);
-      events.onToolCallLog?.('python-pptx', 'Setting up presentation with 16:9 widescreen canvas (13.33" × 7.5")');
-      await sleep(220);
-      events.onToolCallLog?.('python-pptx', 'Slide 1/8: Title slide — modern dark theme & typography hierarchy');
-      await sleep(200);
-      events.onToolCallLog?.('python-pptx', 'Slide 2/8: Executive Summary & agenda bullet points');
-      await sleep(200);
-      events.onToolCallLog?.('python-pptx', 'Slide 3/8: Quantitative metrics comparison table with formatted cells');
-      await sleep(220);
-      events.onToolCallLog?.('python-pptx', 'Slides 4-6/8: Detailed analyses, architecture schematics & milestone cards');
-      await sleep(200);
-      events.onToolCallLog?.('python-pptx', 'Slide 7/8: Risk assessment & mitigation priority matrix');
-      await sleep(180);
-      events.onToolCallLog?.('python-pptx', 'Slide 8/8: Next steps, action items & contact summary');
-      await sleep(160);
-      events.onToolCallLog?.('python-pptx', 'Saved deliverable: presentation.pptx (2.1 MB)');
-      await sleep(150);
-      events.onToolCallEnd?.('python-pptx', true, 1400);
+      events.onToolCallStart?.(
+        "python-pptx",
+        "Generating PowerPoint presentation (.pptx)",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "python-pptx",
+        'Setting up presentation with 16:9 widescreen canvas (13.33" × 7.5")',
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Slide 1/8: Title slide — modern dark theme & typography hierarchy",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Slide 2/8: Executive Summary & agenda bullet points",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Slide 3/8: Quantitative metrics comparison table with formatted cells",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Slides 4-6/8: Detailed analyses, architecture schematics & milestone cards",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Slide 7/8: Risk assessment & mitigation priority matrix",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Slide 8/8: Next steps, action items & contact summary",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "python-pptx",
+        "Saved deliverable: presentation.pptx (2.1 MB)",
+      )
+      await sleep(150)
+      events.onToolCallEnd?.("python-pptx", true, 1400)
     },
     async () => {
-      events.onThought?.('Validating presentation slide geometry, shapes, and font embedding...', 'validation');
-      await sleep(280);
+      events.onThought?.(
+        "Validating presentation slide geometry, shapes, and font embedding...",
+        "validation",
+      )
+      await sleep(280)
     },
     async () => {
-      events.onToolCallStart?.('artifact.validate', 'Validating PPTX slide structure & layout geometry');
-      await sleep(150);
-      events.onToolCallLog?.('artifact.validate', 'Inspecting ppt/presentation.xml and slide master relationships');
-      await sleep(180);
-      events.onToolCallLog?.('artifact.validate', 'Auditing shape bounding boxes, text frames, and table alignments');
-      await sleep(160);
-      events.onToolCallLog?.('artifact.validate', 'Verification passed: 8/8 slides structurally validated');
-      await sleep(140);
-      events.onToolCallEnd?.('artifact.validate', true, 630);
+      events.onToolCallStart?.(
+        "artifact.validate",
+        "Validating PPTX slide structure & layout geometry",
+      )
+      await sleep(150)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Inspecting ppt/presentation.xml and slide master relationships",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Auditing shape bounding boxes, text frames, and table alignments",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Verification passed: 8/8 slides structurally validated",
+      )
+      await sleep(140)
+      events.onToolCallEnd?.("artifact.validate", true, 630)
     },
     async () => {
-      events.onArtifactReady?.('presentation.pptx', 'pptx', 2202009, '/api/v1/artifacts/presentation.pptx/download');
-      await sleep(100);
+      events.onArtifactReady?.(
+        "presentation.pptx",
+        "pptx",
+        2202009,
+        "/api/v1/artifacts/presentation.pptx/download",
+      )
+      await sleep(100)
     },
-  ];
+  ]
 
   const xlsxSequence: Array<() => Promise<void>> = [
     async () => {
-      events.onThought?.('Designing spreadsheet schema, multi-tab data model, and calculation formulas...', 'reasoning');
-      await sleep(380);
+      events.onThought?.(
+        "Designing spreadsheet schema, multi-tab data model, and calculation formulas...",
+        "reasoning",
+      )
+      await sleep(380)
     },
     async () => {
-      events.onToolCallStart?.('openpyxl', 'Building structured Excel workbook (.xlsx)');
-      await sleep(180);
-      events.onToolCallLog?.('openpyxl', 'Initializing workbook with 3 worksheets: [Executive_Summary, Data_Model, Calculations]');
-      await sleep(220);
-      events.onToolCallLog?.('openpyxl', 'Styling header rows: navy background, white bold text, frozen top panes');
-      await sleep(200);
-      events.onToolCallLog?.('openpyxl', 'Populating 1,250 rows across 8 structured data fields');
-      await sleep(220);
-      events.onToolCallLog?.('openpyxl', 'Injecting dynamic formulas: =SUM(), =AVERAGE(), =STDEV.S(), =XLOOKUP()');
-      await sleep(220);
-      events.onToolCallLog?.('openpyxl', 'Applying accounting number formats ($#,##0.00), percentages, and dates');
-      await sleep(180);
-      events.onToolCallLog?.('openpyxl', 'Auto-fitting column dimensions to avoid truncation');
-      await sleep(160);
-      events.onToolCallLog?.('openpyxl', 'Saved deliverable: financial_model.xlsx (780 KB)');
-      await sleep(150);
-      events.onToolCallEnd?.('openpyxl', true, 1350);
+      events.onToolCallStart?.(
+        "openpyxl",
+        "Building structured Excel workbook (.xlsx)",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Initializing workbook with 3 worksheets: [Executive_Summary, Data_Model, Calculations]",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Styling header rows: navy background, white bold text, frozen top panes",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Populating 1,250 rows across 8 structured data fields",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Injecting dynamic formulas: =SUM(), =AVERAGE(), =STDEV.S(), =XLOOKUP()",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Applying accounting number formats ($#,##0.00), percentages, and dates",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Auto-fitting column dimensions to avoid truncation",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "openpyxl",
+        "Saved deliverable: financial_model.xlsx (780 KB)",
+      )
+      await sleep(150)
+      events.onToolCallEnd?.("openpyxl", true, 1350)
     },
     async () => {
-      events.onThought?.('Auditing formula references, cell ranges, and OpenPyXL XML structures...', 'validation');
-      await sleep(280);
+      events.onThought?.(
+        "Auditing formula references, cell ranges, and OpenPyXL XML structures...",
+        "validation",
+      )
+      await sleep(280)
     },
     async () => {
-      events.onToolCallStart?.('artifact.validate', 'Validating XLSX formula calculation chain & cell ranges');
-      await sleep(150);
-      events.onToolCallLog?.('artifact.validate', 'Parsing xl/calcChain.xml and cell dependency graph');
-      await sleep(180);
-      events.onToolCallLog?.('artifact.validate', 'Auditing circular references: 0 circular loops detected');
-      await sleep(160);
-      events.onToolCallLog?.('artifact.validate', 'Checking sheet boundaries and formula syntax across all 3 sheets');
-      await sleep(140);
-      events.onToolCallLog?.('artifact.validate', 'Verification passed: valid OpenXML spreadsheet');
-      await sleep(120);
-      events.onToolCallEnd?.('artifact.validate', true, 610);
+      events.onToolCallStart?.(
+        "artifact.validate",
+        "Validating XLSX formula calculation chain & cell ranges",
+      )
+      await sleep(150)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Parsing xl/calcChain.xml and cell dependency graph",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Auditing circular references: 0 circular loops detected",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Checking sheet boundaries and formula syntax across all 3 sheets",
+      )
+      await sleep(140)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Verification passed: valid OpenXML spreadsheet",
+      )
+      await sleep(120)
+      events.onToolCallEnd?.("artifact.validate", true, 610)
     },
     async () => {
-      events.onArtifactReady?.('financial_model.xlsx', 'xlsx', 798720, '/api/v1/artifacts/financial_model.xlsx/download');
-      await sleep(100);
+      events.onArtifactReady?.(
+        "financial_model.xlsx",
+        "xlsx",
+        798720,
+        "/api/v1/artifacts/financial_model.xlsx/download",
+      )
+      await sleep(100)
     },
-  ];
+  ]
 
   const pdfSequence: Array<() => Promise<void>> = [
     async () => {
-      events.onThought?.('Configuring Platypus flowable document template, page geometry, and styles...', 'reasoning');
-      await sleep(380);
+      events.onThought?.(
+        "Configuring Platypus flowable document template, page geometry, and styles...",
+        "reasoning",
+      )
+      await sleep(380)
     },
     async () => {
-      events.onToolCallStart?.('reportlab', 'Composing formal PDF report (.pdf)');
-      await sleep(180);
-      events.onToolCallLog?.('reportlab', 'Building SimpleDocTemplate (A4, 20mm margins, 2-column layout)');
-      await sleep(220);
-      events.onToolCallLog?.('reportlab', 'Applying typography stylesheet: Title (24pt), Heading 1 (16pt), BodyText (10pt/14pt leading)');
-      await sleep(200);
-      events.onToolCallLog?.('reportlab', 'Rendering Executive Summary and Operational Findings');
-      await sleep(220);
-      events.onToolCallLog?.('reportlab', 'Rendering Risk Assessment Matrix (8×4 Table with TableStyle colors)');
-      await sleep(200);
-      events.onToolCallLog?.('reportlab', 'Adding dynamic Page X of Y canvas footer');
-      await sleep(180);
-      events.onToolCallLog?.('reportlab', 'Saved deliverable: compliance_report.pdf (412 KB)');
-      await sleep(150);
-      events.onToolCallEnd?.('reportlab', true, 1300);
+      events.onToolCallStart?.(
+        "reportlab",
+        "Composing formal PDF report (.pdf)",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "reportlab",
+        "Building SimpleDocTemplate (A4, 20mm margins, 2-column layout)",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "reportlab",
+        "Applying typography stylesheet: Title (24pt), Heading 1 (16pt), BodyText (10pt/14pt leading)",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "reportlab",
+        "Rendering Executive Summary and Operational Findings",
+      )
+      await sleep(220)
+      events.onToolCallLog?.(
+        "reportlab",
+        "Rendering Risk Assessment Matrix (8×4 Table with TableStyle colors)",
+      )
+      await sleep(200)
+      events.onToolCallLog?.(
+        "reportlab",
+        "Adding dynamic Page X of Y canvas footer",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "reportlab",
+        "Saved deliverable: compliance_report.pdf (412 KB)",
+      )
+      await sleep(150)
+      events.onToolCallEnd?.("reportlab", true, 1300)
     },
     async () => {
-      events.onThought?.('Validating PDF xref table, fonts, and bounding boxes...', 'validation');
-      await sleep(280);
+      events.onThought?.(
+        "Validating PDF xref table, fonts, and bounding boxes...",
+        "validation",
+      )
+      await sleep(280)
     },
     async () => {
-      events.onToolCallStart?.('artifact.validate', 'Validating PDF document structure & stream objects');
-      await sleep(150);
-      events.onToolCallLog?.('artifact.validate', 'Inspecting PDF header %PDF-1.7 and xref cross-reference table');
-      await sleep(180);
-      events.onToolCallLog?.('artifact.validate', 'Checking embedded fonts (Helvetica, Helvetica-Bold) and color spaces');
-      await sleep(160);
-      events.onToolCallLog?.('artifact.validate', 'Verifying page stream flow: 6 pages rendered without clipping');
-      await sleep(140);
-      events.onToolCallLog?.('artifact.validate', 'Verification passed: 6 pages structurally valid');
-      await sleep(120);
-      events.onToolCallEnd?.('artifact.validate', true, 630);
+      events.onToolCallStart?.(
+        "artifact.validate",
+        "Validating PDF document structure & stream objects",
+      )
+      await sleep(150)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Inspecting PDF header %PDF-1.7 and xref cross-reference table",
+      )
+      await sleep(180)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Checking embedded fonts (Helvetica, Helvetica-Bold) and color spaces",
+      )
+      await sleep(160)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Verifying page stream flow: 6 pages rendered without clipping",
+      )
+      await sleep(140)
+      events.onToolCallLog?.(
+        "artifact.validate",
+        "Verification passed: 6 pages structurally valid",
+      )
+      await sleep(120)
+      events.onToolCallEnd?.("artifact.validate", true, 630)
     },
     async () => {
-      events.onArtifactReady?.('compliance_report.pdf', 'pdf', 421888, '/api/v1/artifacts/compliance_report.pdf/download');
-      await sleep(100);
+      events.onArtifactReady?.(
+        "compliance_report.pdf",
+        "pdf",
+        421888,
+        "/api/v1/artifacts/compliance_report.pdf/download",
+      )
+      await sleep(100)
     },
-  ];
+  ]
 
   const sequences: Record<string, Array<() => Promise<void>>> = {
     docx: docxSequence,
@@ -530,86 +742,146 @@ async function simulateMockAgentEvents(
 
     sensor: [
       async () => {
-        events.onThought?.('Parsing sensor data file and detecting time-series structure...', 'reasoning');
-        await sleep(420);
+        events.onThought?.(
+          "Parsing sensor data file and detecting time-series structure...",
+          "reasoning",
+        )
+        await sleep(420)
       },
       async () => {
-        events.onToolCallStart?.('rag.search', 'Searching knowledge base for relevant thresholds and baselines');
-        await sleep(320);
-        events.onToolCallLog?.('rag.search', 'Querying vector index for "pressure variance operational limits"');
-        await sleep(280);
-        events.onToolCallLog?.('rag.search', 'Retrieved 4 relevant knowledge chunks (similarity ≥ 0.82)');
-        await sleep(200);
-        events.onToolCallEnd?.('rag.search', true, 820);
+        events.onToolCallStart?.(
+          "rag.search",
+          "Searching knowledge base for relevant thresholds and baselines",
+        )
+        await sleep(320)
+        events.onToolCallLog?.(
+          "rag.search",
+          'Querying vector index for "pressure variance operational limits"',
+        )
+        await sleep(280)
+        events.onToolCallLog?.(
+          "rag.search",
+          "Retrieved 4 relevant knowledge chunks (similarity ≥ 0.82)",
+        )
+        await sleep(200)
+        events.onToolCallEnd?.("rag.search", true, 820)
       },
       async () => {
-        events.onThought?.('Running statistical anomaly detection across 3 sensor streams...', 'analysis');
-        await sleep(550);
+        events.onThought?.(
+          "Running statistical anomaly detection across 3 sensor streams...",
+          "analysis",
+        )
+        await sleep(550)
       },
       async () => {
-        events.onToolCallStart?.('sandbox.execute', 'Computing anomaly score using IQR + rolling-window z-score');
-        await sleep(150);
-        events.onToolCallLog?.('sandbox.execute', 'Loading pandas DataFrame: 8640 rows × 12 columns');
-        await sleep(200);
-        events.onToolCallLog?.('sandbox.execute', 'Detected 3 anomaly clusters. Peak at row 4821 (z=3.4)');
-        await sleep(180);
-        events.onToolCallLog?.('sandbox.execute', 'Generating summary statistics...');
-        await sleep(280);
-        events.onToolCallEnd?.('sandbox.execute', true, 810);
+        events.onToolCallStart?.(
+          "sandbox.execute",
+          "Computing anomaly score using IQR + rolling-window z-score",
+        )
+        await sleep(150)
+        events.onToolCallLog?.(
+          "sandbox.execute",
+          "Loading pandas DataFrame: 8640 rows × 12 columns",
+        )
+        await sleep(200)
+        events.onToolCallLog?.(
+          "sandbox.execute",
+          "Detected 3 anomaly clusters. Peak at row 4821 (z=3.4)",
+        )
+        await sleep(180)
+        events.onToolCallLog?.(
+          "sandbox.execute",
+          "Generating summary statistics...",
+        )
+        await sleep(280)
+        events.onToolCallEnd?.("sandbox.execute", true, 810)
       },
     ],
 
     image: [
       async () => {
-        events.onThought?.('Loading image and selecting visual inspection model...', 'reasoning');
-        await sleep(350);
+        events.onThought?.(
+          "Loading image and selecting visual inspection model...",
+          "reasoning",
+        )
+        await sleep(350)
       },
       async () => {
-        events.onToolCallStart?.('vision.analyze', 'Running visual anomaly detection on uploaded image');
-        await sleep(200);
-        events.onToolCallLog?.('vision.analyze', 'Image dimensions: 1920×1080 — splitting into 4 tiles');
-        await sleep(280);
-        events.onToolCallLog?.('vision.analyze', 'Tile 1/4: no anomalies detected');
-        await sleep(180);
-        events.onToolCallLog?.('vision.analyze', 'Tile 2/4: surface irregularity at (x=814, y=423) — confidence 0.87');
-        await sleep(220);
-        events.onToolCallLog?.('vision.analyze', 'Tile 3/4 & 4/4: no anomalies detected');
-        await sleep(150);
-        events.onToolCallEnd?.('vision.analyze', true, 1030);
+        events.onToolCallStart?.(
+          "vision.analyze",
+          "Running visual anomaly detection on uploaded image",
+        )
+        await sleep(200)
+        events.onToolCallLog?.(
+          "vision.analyze",
+          "Image dimensions: 1920×1080 — splitting into 4 tiles",
+        )
+        await sleep(280)
+        events.onToolCallLog?.(
+          "vision.analyze",
+          "Tile 1/4: no anomalies detected",
+        )
+        await sleep(180)
+        events.onToolCallLog?.(
+          "vision.analyze",
+          "Tile 2/4: surface irregularity at (x=814, y=423) — confidence 0.87",
+        )
+        await sleep(220)
+        events.onToolCallLog?.(
+          "vision.analyze",
+          "Tile 3/4 & 4/4: no anomalies detected",
+        )
+        await sleep(150)
+        events.onToolCallEnd?.("vision.analyze", true, 1030)
       },
       async () => {
-        events.onThought?.('Correlating visual findings with equipment maintenance records...', 'reasoning');
-        await sleep(380);
+        events.onThought?.(
+          "Correlating visual findings with equipment maintenance records...",
+          "reasoning",
+        )
+        await sleep(380)
       },
     ],
 
     general: [
       async () => {
-        events.onThought?.('Understanding request and identifying relevant knowledge sources...', 'reasoning');
-        await sleep(380);
+        events.onThought?.(
+          "Understanding request and identifying relevant knowledge sources...",
+          "reasoning",
+        )
+        await sleep(380)
       },
       async () => {
-        events.onToolCallStart?.('rag.search', 'Searching knowledge base for context');
-        await sleep(280);
-        events.onToolCallLog?.('rag.search', 'Retrieved 3 relevant knowledge chunks');
-        await sleep(200);
-        events.onToolCallEnd?.('rag.search', true, 480);
+        events.onToolCallStart?.(
+          "rag.search",
+          "Searching knowledge base for context",
+        )
+        await sleep(280)
+        events.onToolCallLog?.(
+          "rag.search",
+          "Retrieved 3 relevant knowledge chunks",
+        )
+        await sleep(200)
+        events.onToolCallEnd?.("rag.search", true, 480)
       },
       async () => {
-        events.onThought?.('Synthesizing findings into coherent response...', 'generation');
-        await sleep(420);
+        events.onThought?.(
+          "Synthesizing findings into coherent response...",
+          "generation",
+        )
+        await sleep(420)
       },
     ],
-  };
+  }
 
-  const detectedArtifact = detectArtifactType(userContent);
-  const selectedKey = detectedArtifact || intent;
-  const steps = sequences[selectedKey] ?? sequences.general;
+  const detectedArtifact = detectArtifactType(userContent)
+  const selectedKey = detectedArtifact || intent
+  const steps = sequences[selectedKey] ?? sequences.general
 
   for (const step of steps) {
-    if (check()) return;
-    await step();
-    if (check()) return;
+    if (check()) return
+    await step()
+    if (check()) return
   }
 }
 
@@ -617,119 +889,129 @@ async function simulateMockAgentEvents(
 // Mock agent step generation (used when backend is not configured)
 // ---------------------------------------------------------------------------
 
-export function generateAgentSteps(intent: string, content?: string): AgentStep[] {
-  const artifactType = content ? detectArtifactType(content) : null;
-  const effectiveType = artifactType || intent;
+export function generateAgentSteps(
+  intent: string,
+  content?: string,
+): AgentStep[] {
+  const artifactType = content ? detectArtifactType(content) : null
+  const effectiveType = artifactType || intent
 
   const steps: Record<string, string[]> = {
     docx: [
-      'Configured document typography & page geometry',
-      'Structured executive sections & body headings',
-      'Formatted tabular data and cell alignment',
-      'Validated OpenXML document schema & style relationships',
+      "Configured document typography & page geometry",
+      "Structured executive sections & body headings",
+      "Formatted tabular data and cell alignment",
+      "Validated OpenXML document schema & style relationships",
     ],
     pptx: [
-      'Planned 16:9 widescreen presentation outline',
-      'Applied corporate color palette & slide master',
-      'Rendered content cards, bullet blocks & metrics table',
-      'Validated PPTX slide geometry and shape hierarchy',
+      "Planned 16:9 widescreen presentation outline",
+      "Applied corporate color palette & slide master",
+      "Rendered content cards, bullet blocks & metrics table",
+      "Validated PPTX slide geometry and shape hierarchy",
     ],
     xlsx: [
-      'Constructed multi-sheet workbook structure',
-      'Applied frozen headers & accounting cell formatting',
-      'Calculated dynamic formula models (=SUM, =AVERAGE)',
-      'Validated calculation chain and zero circular references',
+      "Constructed multi-sheet workbook structure",
+      "Applied frozen headers & accounting cell formatting",
+      "Calculated dynamic formula models (=SUM, =AVERAGE)",
+      "Validated calculation chain and zero circular references",
     ],
     pdf: [
-      'Designed Platypus document layout and A4 margins',
-      'Compiled custom ParagraphStyles & color palette',
-      'Rendered risk assessment table & page numbering canvas',
-      'Validated PDF xref structure and embedded fonts',
+      "Designed Platypus document layout and A4 margins",
+      "Compiled custom ParagraphStyles & color palette",
+      "Rendered risk assessment table & page numbering canvas",
+      "Validated PDF xref structure and embedded fonts",
     ],
     sensor: [
-      'Ingested sensor data file',
-      'Processed time-series readings',
-      'Detected anomalies',
-      'Compared operating thresholds',
-      'Prepared analysis report',
+      "Ingested sensor data file",
+      "Processed time-series readings",
+      "Detected anomalies",
+      "Compared operating thresholds",
+      "Prepared analysis report",
     ],
     document: [
-      'Extracted document text',
-      'Parsed document structure',
-      'Indexed key sections',
-      'Cross-referenced knowledge base',
-      'Generated summary',
+      "Extracted document text",
+      "Parsed document structure",
+      "Indexed key sections",
+      "Cross-referenced knowledge base",
+      "Generated summary",
     ],
     image: [
-      'Loaded image data',
-      'Ran visual inspection model',
-      'Identified anomalies',
-      'Assessed severity',
-      'Prepared recommendations',
+      "Loaded image data",
+      "Ran visual inspection model",
+      "Identified anomalies",
+      "Assessed severity",
+      "Prepared recommendations",
     ],
     general: [
-      'Parsed user request',
-      'Queried knowledge base',
-      'Synthesized findings',
-      'Generated response',
+      "Parsed user request",
+      "Queried knowledge base",
+      "Synthesized findings",
+      "Generated response",
     ],
     report: [
-      'Gathered findings',
-      'Structured report sections',
-      'Applied formatting',
-      'Generated PDF report',
+      "Gathered findings",
+      "Structured report sections",
+      "Applied formatting",
+      "Generated PDF report",
     ],
-  };
+  }
   return (steps[effectiveType] || steps.general).map((label, i) => ({
     id: `step-${i}`,
     label,
-    status: 'done' as const,
+    status: "done" as const,
     duration: `${(0.5 + Math.random() * 2).toFixed(1)}s`,
-  }));
+  }))
 }
 
 /** Generate mock files for demo mode (no backend) */
-export function generateMockFiles(intent: string, content?: string): GeneratedFile[] {
-  const artifactType = content ? detectArtifactType(content) : null;
+export function generateMockFiles(
+  intent: string,
+  content?: string,
+): GeneratedFile[] {
+  const artifactType = content ? detectArtifactType(content) : null
   const effectiveType =
     artifactType ||
-    (intent === 'docx' || intent === 'document'
-      ? 'docx'
-      : intent === 'pptx'
-      ? 'pptx'
-      : intent === 'xlsx'
-      ? 'xlsx'
-      : intent === 'report' || intent === 'pdf' || intent === 'sensor'
-      ? 'pdf'
-      : null);
+    (intent === "docx" || intent === "document"
+      ? "docx"
+      : intent === "pptx"
+        ? "pptx"
+        : intent === "xlsx"
+          ? "xlsx"
+          : intent === "report" || intent === "pdf" || intent === "sensor"
+            ? "pdf"
+            : null)
 
-  if (!effectiveType) return [];
+  if (!effectiveType) return []
 
-  const timestamp = Date.now();
-  const fileConfigs: Record<string, { name: string; type: string; size: string }> = {
+  const timestamp = Date.now()
+  const fileConfigs: Record<string, {
+    name: string
+    type: string
+    size: string
+  }> = {
     docx: {
       name: `document_${timestamp.toString().slice(-4)}.docx`,
-      type: 'docx',
+      type: "docx",
       size: `${Math.floor(280 + Math.random() * 150)} KB`,
     },
     pptx: {
       name: `presentation_${timestamp.toString().slice(-4)}.pptx`,
-      type: 'pptx',
+      type: "pptx",
       size: `${(1.8 + Math.random() * 0.8).toFixed(1)} MB`,
     },
     xlsx: {
       name: `financial_model_${timestamp.toString().slice(-4)}.xlsx`,
-      type: 'xlsx',
+      type: "xlsx",
       size: `${Math.floor(620 + Math.random() * 250)} KB`,
     },
     pdf: {
       name: `analysis_report_${timestamp.toString().slice(-4)}.pdf`,
-      type: 'pdf',
+      type: "pdf",
       size: `${Math.floor(320 + Math.random() * 200)} KB`,
     },
-  };
+  }
 
-  const cfg = fileConfigs[effectiveType] ?? fileConfigs.pdf;
+  const cfg = fileConfigs[effectiveType] ?? fileConfigs.pdf
   return [
     {
       id: `gf-${timestamp}`,
@@ -737,5 +1019,5 @@ export function generateMockFiles(intent: string, content?: string): GeneratedFi
       type: cfg.type,
       size: cfg.size,
     },
-  ];
+  ]
 }

@@ -1,14 +1,25 @@
 import { useCallback } from 'react';
 import { useLocalStorage } from './useLocalStorage';
 import type { Session, Message } from '../types';
-import { DEMO_SESSIONS } from '../services/mockData';
+
+const INITIAL_SESSIONS: Session[] = [
+  {
+    id: 'session-1',
+    title: 'Industrial Workspace',
+    subtitle: 'New session',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    pinned: false,
+    messages: [],
+  },
+];
 
 function reviveDates(sessions: Session[]): Session[] {
   return sessions.map(s => ({
     ...s,
     createdAt: new Date(s.createdAt),
     updatedAt: new Date(s.updatedAt),
-    messages: s.messages.map(m => ({ ...m, timestamp: new Date(m.timestamp) }))
+    messages: (s.messages || []).map(m => ({ ...m, timestamp: new Date(m.timestamp) })),
   }));
 }
 
@@ -17,7 +28,7 @@ function makeId() {
 }
 
 export function useSessions() {
-  const [sessions, setSessions] = useLocalStorage<Session[]>('sovereign-sessions', DEMO_SESSIONS);
+  const [sessions, setSessions] = useLocalStorage<Session[]>('sovereign-sessions', INITIAL_SESSIONS);
   const [activeId, setActiveId] = useLocalStorage<string | null>('sovereign-active-session', 'session-1');
 
   const revivedSessions = reviveDates(sessions);
@@ -32,7 +43,7 @@ export function useSessions() {
       createdAt: new Date(),
       updatedAt: new Date(),
       pinned: false,
-      messages: []
+      messages: [],
     };
     setSessions(prev => [newSession, ...prev]);
     setActiveId(id);

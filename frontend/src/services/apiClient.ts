@@ -1,5 +1,5 @@
-import { backendUrl } from './backendConfig';
-import { authService } from './authService';
+import { backendUrl } from "./backendConfig"
+import { authService } from "./authService"
 
 /**
  * Backend-ready authenticated API helper.
@@ -10,36 +10,37 @@ export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = authService.getToken();
-  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const token = authService.getToken()
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData
 
   const headers: Record<string, string> = {
-    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...((options.headers as Record<string, string>) || {}),
-  };
+    ...(options.headers as Record<string, string> || {}),
+  }
 
   const response = await fetch(backendUrl(path), {
     ...options,
     headers,
-  });
+  })
 
   if (!response.ok) {
     if (response.status === 401) {
       // Token expired or invalid
-      authService.removeToken();
+      authService.removeToken()
     }
-    const errorText = await response.text().catch(() => 'Request failed');
-    let message = errorText;
+    const errorText = await response.text().catch(() => "Request failed")
+    let message = errorText
     try {
-      const json = JSON.parse(errorText);
-      message = json.detail || json.message || errorText;
+      const json = JSON.parse(errorText)
+      message = json.detail || json.message || errorText
     } catch {
       // keep raw message
     }
-    throw new Error(message || `Request failed with status ${response.status}`);
+    throw new Error(message || `Request failed with status ${response.status}`)
   }
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
 }
