@@ -352,6 +352,16 @@ class IndustrialWorkbenchAgent:
         else:
             response_text = f"Failed to generate {intent.artifact_type.upper()} artifact after {len(code_result.attempts)} attempt(s)."
 
+        if streamer is not None:
+            if response_text:
+                streamer.emit_content_delta(response_text)
+            streamer.emit_task_complete(
+                task_id=task_id,
+                model=code_result.selected_model or "python-sandbox",
+                provider=code_result.provider or "local",
+                tool_count=len(code_result.tool_results or []),
+            )
+
         return ArtifactGenerationResult(
             task_id=task_id,
             artifact_type=intent.artifact_type,

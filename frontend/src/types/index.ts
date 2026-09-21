@@ -1,113 +1,113 @@
-export type MessageRole = 'user' | 'assistant';
+export type MessageRole = "user" | "assistant"
 
 export interface Attachment {
-  id: string;
-  name: string;
-  type: 'pdf' | 'csv' | 'xlsx' | 'docx' | 'txt' | 'image' | 'other';
-  size: number;
-  url?: string;
-  dataUrl?: string;
+  id: string
+  name: string
+  type: "pdf" | "csv" | "xlsx" | "docx" | "txt" | "image" | "other"
+  size: number
+  url?: string
+  dataUrl?: string
 }
 
 export interface AgentStep {
-  id: string;
-  label: string;
-  status: 'done' | 'active' | 'pending';
-  duration?: string;
+  id: string
+  label: string
+  status: "done" | "active" | "pending"
+  duration?: string
   /** Tool name for tool-related steps, e.g. "python-pptx", "sandbox.execute" */
-  tool?: string;
+  tool?: string
   /** Live stdout/stderr lines from tool execution */
-  logs?: string[];
+  logs?: string[]
   /** Whether the log panel is expanded in the UI */
-  expanded?: boolean;
+  expanded?: boolean
   /** When the step started (for elapsed time display) */
-  startedAt?: number;
+  startedAt?: number
 }
 
 export interface GeneratedFile {
-  id: string;
-  name: string;
-  type: string;
-  size: string;
+  id: string
+  name: string
+  type: string
+  size: string
   /** Backend download URL (real backend only) */
-  download_url?: string;
+  download_url?: string
   /** Preview image URL (real backend only) */
-  preview_url?: string;
+  preview_url?: string
 }
 
 export interface Message {
-  id: string;
-  role: MessageRole;
-  content: string;
-  timestamp: Date;
-  attachments?: Attachment[];
-  agentSteps?: AgentStep[];
-  generatedFiles?: GeneratedFile[];
-  liked?: boolean;
-  disliked?: boolean;
+  id: string
+  role: MessageRole
+  content: string
+  timestamp: Date
+  attachments?: Attachment[]
+  agentSteps?: AgentStep[]
+  generatedFiles?: GeneratedFile[]
+  liked?: boolean
+  disliked?: boolean
 }
 
 export interface Session {
-  id: string;
-  title: string;
-  subtitle: string;
-  createdAt: Date;
-  updatedAt: Date;
-  pinned: boolean;
-  messages: Message[];
+  id: string
+  title: string
+  subtitle: string
+  createdAt: Date
+  updatedAt: Date
+  pinned: boolean
+  messages: Message[]
 }
 
 export interface KnowledgeDoc {
-  id: string;
-  name: string;
-  type: string;
-  size: string;
-  uploadedAt: Date;
-  indexed: boolean;
-  category: 'maintenance' | 'safety' | 'engineering' | 'operations';
+  id: string
+  name: string
+  type: string
+  size: string
+  uploadedAt: Date
+  indexed: boolean
+  category: "maintenance" | "safety" | "engineering" | "operations"
 }
 
 export interface Agent {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  category: string;
-  lastRun?: Date;
-  status: 'ready' | 'running' | 'error';
+  id: string
+  name: string
+  description: string
+  icon: string
+  category: string
+  lastRun?: Date
+  status: "ready" | "running" | "error"
 }
 
 export interface WorkflowNode {
-  id: string;
-  type: string;
-  label: string;
-  x: number;
-  y: number;
-  config?: Record<string, string>;
+  id: string
+  type: string
+  label: string
+  x: number
+  y: number
+  config?: Record<string, string>
 }
 
 export interface Workflow {
-  id: string;
-  name: string;
-  nodes: WorkflowNode[];
-  createdAt: Date;
-  updatedAt: Date;
+  id: string
+  name: string
+  nodes: WorkflowNode[]
+  createdAt: Date
+  updatedAt: Date
 }
 
-export type Theme = 'dark' | 'light';
+export type Theme = "dark" | "light"
 
 export interface AppSettings {
-  theme: Theme;
+  theme: Theme
   notifications: {
-    aiCompletion: boolean;
-    agentCompletion: boolean;
-    securityAlerts: boolean;
-  };
+    aiCompletion: boolean
+    agentCompletion: boolean
+    securityAlerts: boolean
+  }
   security: {
-    sessionTimeout: boolean;
-    auditLogging: boolean;
-    secureProcessing: boolean;
-  };
+    sessionTimeout: boolean
+    auditLogging: boolean
+    secureProcessing: boolean
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -115,37 +115,37 @@ export interface AppSettings {
 // ---------------------------------------------------------------------------
 
 export interface TaskInitPayload {
-  task_id: string;
-  model?: string;
-  intent?: string;
-  capabilities?: string[];
+  task_id: string
+  model?: string
+  intent?: string
+  capabilities?: string[]
 }
 
 export interface ToolCallStartPayload {
-  tool: string;
-  description: string;
-  args_preview?: Record<string, unknown>;
+  tool: string
+  description: string
+  args_preview?: Record<string, unknown>
 }
 
 export interface ToolCallEndPayload {
-  tool: string;
-  success: boolean;
-  duration_ms?: number;
-  summary?: string;
+  tool: string
+  success: boolean
+  duration_ms?: number
+  summary?: string
 }
 
 export interface ArtifactPayload {
-  name: string;
-  file_type: string;
-  size_bytes: number;
-  download_url: string;
-  preview_url?: string;
+  name: string
+  file_type: string
+  size_bytes: number
+  download_url: string
+  preview_url?: string
 }
 
 export interface TaskCompletePayload {
-  task_id: string;
-  duration_ms: number;
-  model?: string;
-  provider?: string;
-  tool_count?: number;
+  task_id: string
+  duration_ms: number
+  model?: string
+  provider?: string
+  tool_count?: number
 }

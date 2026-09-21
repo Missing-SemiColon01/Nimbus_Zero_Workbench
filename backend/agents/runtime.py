@@ -444,17 +444,14 @@ class AgentRuntime:
             attempted_models.append(model.id)
             try:
                 if streamer is not None:
-                    # Stream tokens directly to SSE
+                    # Stream tokens directly to SSE and accumulate
+                    accumulated = ""
                     async for token in self.providers.stream_generate(model, model_request):
+                        accumulated += token
                         streamer.emit_content_delta(token)
-                    # After streaming, if tools are configured, call generate once to detect tool calls
                     if model_request.tools:
                         response = await self.providers.generate(model, model_request)
                     else:
-                        # No tools needed, collect streamed content
-                        accumulated = ""
-                        async for token in self.providers.stream_generate(model, model_request):
-                            accumulated += token
                         response = ModelResponse(content=accumulated, model_id=model.id)
                 else:
                     response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
