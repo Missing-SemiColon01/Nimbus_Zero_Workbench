@@ -14,15 +14,45 @@ import { Security } from './pages/Security';
 import { Settings } from './pages/Settings';
 import { useSessions } from './hooks/useSessions';
 import { useTheme } from './hooks/useTheme';
+import { authService } from './services/authService';
 
 function AppInner() {
-  const [authenticated, setAuthenticated] = useState(() => localStorage.getItem('sovereign-auth') === 'true');
-  const [userEmail, setUserEmail] = useState(() => localStorage.getItem('sovereign-user-email') || '');
+  const [authenticated, setAuthenticated] = useState(() => authService.isAuthenticated());
+  const [userEmail, setUserEmail] = useState(() => {
+    const saved = authService.getSavedUser();
+    return saved?.email || localStorage.getItem('sovereign-user-email') || '';
+  });
+  const [userName, setUserName] = useState(() => {
+    const saved = authService.getSavedUser();
+    return saved?.name || localStorage.getItem('sovereign-user-name') || '';
+  });
+  const [userOrg, setUserOrg] = useState(() => {
+    const saved = authService.getSavedUser();
+    return saved?.organization || localStorage.getItem('sovereign-user-organization') || '';
+  });
+
   const { sessions, activeSession, activeId, setActiveId, createSession, renameSession, deleteSession, pinSession, addMessage, updateMessage, clearAllHistory } = useSessions();
   const { theme, setTheme, toggleTheme } = useTheme();
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // Validate token on mount
+  useEffect(() => {
+    const token = authService.getToken();
+    if (token && token !== 'demo-sovereign-token') {
+      authService.verifyToken(token).then(res => {
+        if (!res.valid) {
+          authService.removeToken();
+          setAuthenticated(false);
+        } else if (res.user) {
+          setUserEmail(res.user.email);
+          setUserName(res.user.name);
+          if (res.user.organization) setUserOrg(res.user.organization);
+        }
+      });
+    }
+  }, []);
 
   // Mobile detection
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -38,13 +68,14 @@ function AppInner() {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
-
   if (!authenticated) {
     if (location.pathname !== '/login') {
       return <Navigate to="/login" replace />;
     }
-    return <Login onLogin={(email) => {
+    return <Login onLogin={(email, name, org) => {
       setUserEmail(email);
+      if (name) setUserName(name);
+      if (org) setUserOrg(org);
       setAuthenticated(true);
     }} />;
   }
@@ -131,12 +162,16 @@ function AppInner() {
           onToggleTheme={toggleTheme}
           onToggleSidebar={handleSidebarToggle}
           isMobile={isMobile}
-          onLogout={() => {
-            localStorage.removeItem('sovereign-auth');
+          onLogout={async () => {
+            await authService.logout();
             setAuthenticated(false);
             setUserEmail('');
+            setUserName('');
+            setUserOrg('');
           }}
           userEmail={userEmail}
+          userName={userName}
+          userOrg={userOrg}
         />
 
         <div className="flex flex-1 min-h-0 overflow-hidden">

@@ -30,6 +30,12 @@ export interface StreamCallbacks {
   onDone?: () => void;
 }
 
+export interface TaskChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images?: string[];
+}
+
 export interface TaskPayload {
   request: string;
   task_type?: string;
@@ -39,6 +45,8 @@ export interface TaskPayload {
   document_paths?: string[];
   approved_tools?: string[];
   generation_mode?: string;
+  messages?: TaskChatMessage[];
+  session_id?: string;
 }
 
 /**
@@ -54,10 +62,16 @@ export async function streamTask(
   signal?: AbortSignal,
 ): Promise<void> {
   const url = backendUrl('/api/v1/tasks/stream');
+  const token = localStorage.getItem('sovereign-jwt-token');
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
     signal,
   });

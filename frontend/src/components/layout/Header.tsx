@@ -14,9 +14,11 @@ interface HeaderProps {
   isMobile?: boolean;
   onLogout: () => void;
   userEmail?: string;
+  userName?: string;
+  userOrg?: string;
 }
 
-export function Header({ sessionTitle, theme, onToggleTheme, onToggleSidebar, onToggleContext, isMobile, onLogout, userEmail }: HeaderProps) {
+export function Header({ sessionTitle, theme, onToggleTheme, onToggleSidebar, onToggleContext, isMobile, onLogout, userEmail, userName, userOrg }: HeaderProps) {
   const [securityPopover, setSecurityPopover] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [signOutModal, setSignOutModal] = useState(false);
@@ -83,13 +85,13 @@ export function Header({ sessionTitle, theme, onToggleTheme, onToggleSidebar, on
             className="w-8 h-8 rounded-full bg-[var(--accent)] flex items-center justify-center text-white text-xs font-semibold hover:opacity-90 transition-opacity"
             aria-label="Profile menu"
           >
-            M
+            {userName ? userName.charAt(0).toUpperCase() : (userEmail ? userEmail.charAt(0).toUpperCase() : 'U')}
           </button>
           {profileOpen && (
-            <div className="absolute right-0 top-full mt-2 z-50 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl shadow-xl py-1 min-w-[160px] animate-fade-in">
+            <div className="absolute right-0 top-full mt-2 z-50 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl shadow-xl py-1 min-w-[180px] animate-fade-in">
               <div className="px-3 py-2 border-b border-[var(--border-color)] mb-1">
-                <div className="text-xs font-medium text-[var(--text-primary)]">{userEmail || "Demo Operator"}</div>
-                <div className="text-[11px] text-[var(--text-muted)]">Operations Engineer</div>
+                <div className="text-xs font-medium text-[var(--text-primary)]">{userName || userEmail || "Demo Operator"}</div>
+                <div className="text-[11px] text-[var(--text-muted)]">{userOrg || "Operations"} · {userEmail}</div>
               </div>
               <button onClick={() => { setProfileOpen(false); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-white/5 transition-colors">
                 <User size={12} /> Profile

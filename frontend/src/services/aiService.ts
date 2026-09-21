@@ -230,18 +230,41 @@ export interface AgentEventCallbacks {
  * @param signal        - Optional AbortSignal
  * @param agentEvents   - Optional SSE agent event callbacks (real backend only)
  */
+export interface GenerateOptions {
+  sessionId?: string;
+  taskType?: string;
+  images?: string[];
+  documents?: string[];
+  documentPaths?: string[];
+}
+
 export async function generateResponse(
   messages: Message[],
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
   agentEvents?: AgentEventCallbacks,
+  options?: GenerateOptions,
 ): Promise<void> {
   const last = messages[messages.length - 1];
 
   if (BACKEND_AVAILABLE) {
+    // Format previous messages for conversation history
+    const formattedMessages = messages.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
+
     // --- Real backend SSE path ---
     await streamTask(
-      { request: last.content },
+      {
+        request: last.content,
+        messages: formattedMessages,
+        session_id: options?.sessionId,
+        task_type: options?.taskType,
+        images: options?.images,
+        documents: options?.documents,
+        document_paths: options?.documentPaths,
+      },
       {
         onTaskInit() {
           /* task started */

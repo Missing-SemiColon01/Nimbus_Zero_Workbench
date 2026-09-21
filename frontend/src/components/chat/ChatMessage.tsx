@@ -3,6 +3,7 @@ import { Copy, RefreshCw, ThumbsUp, ThumbsDown, Check, Download, ExternalLink, F
 import { AgentActivity } from './AgentActivity';
 import { MessageAttachment } from './FileAttachment';
 import { useToast } from '../ui/Toast';
+import { backendUrl } from '../../services/backendConfig';
 import type { Message, AgentStep } from '../../types';
 
 interface ChatMessageProps {
@@ -115,8 +116,10 @@ export function ChatMessage({ message, onLike, onDislike, onRegenerate, streamin
                 <div className="flex gap-1">
                   {f.download_url ? (
                     <a
-                      href={f.download_url}
+                      href={backendUrl(f.download_url)}
                       download={f.name}
+                      target="_blank"
+                      rel="noreferrer"
                       className="px-2 py-1 text-[10px] rounded bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors flex items-center gap-1"
                     >
                       <Download size={9} /> Download

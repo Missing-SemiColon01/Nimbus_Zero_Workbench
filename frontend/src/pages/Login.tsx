@@ -16,9 +16,10 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../components/ui/Toast';
+import { authService } from '../services/authService';
 
 type LoginProps = {
-  onLogin: (email: string) => void;
+  onLogin: (email: string, name?: string, organization?: string) => void;
 };
 
 function SovereignMark({ size = 48 }: { size?: number }) {
@@ -51,7 +52,7 @@ export function Login({ onLogin }: LoginProps) {
     localStorage.setItem('sovereign-login-theme', light ? 'light' : 'dark');
   }, [light]);
 
-  function submitLogin(e: FormEvent) {
+  async function submitLogin(e: FormEvent) {
     e.preventDefault();
     setError('');
     if (!email.trim()) return setError('Work email is required.');
@@ -60,16 +61,19 @@ export function Login({ onLogin }: LoginProps) {
     if (password.length < 4) return setError('Password must contain at least 4 characters.');
 
     setLoading(true);
-    window.setTimeout(() => {
+    try {
+      const res = await authService.login({ email: email.trim(), password });
+      onLogin(res.user.email, res.user.name, res.user.organization || undefined);
+      showToast('Authentication successful. Welcome to Sovereign AI.');
+      navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'Invalid email or password.');
+    } finally {
       setLoading(false);
-      setPassword('');
-      setMode('verify');
-      setError('');
-      showToast('Credentials accepted. Verify your identity to continue.');
-    }, 650);
+    }
   }
 
-  function submitVerification(e: FormEvent) {
+  async function submitVerification(e: FormEvent) {
     e.preventDefault();
     setError('');
     if (!/^\S+@\S+\.\S+$/.test(email)) return setError('Enter a valid work email.');
@@ -77,29 +81,35 @@ export function Login({ onLogin }: LoginProps) {
     if (password.length < 4) return setError('Password must contain at least 4 characters.');
 
     setLoading(true);
-    window.setTimeout(() => {
-      localStorage.setItem('sovereign-auth', 'true');
-      if (remember) localStorage.setItem('sovereign-user-email', email.trim());
-      onLogin(email.trim());
+    try {
+      const res = await authService.login({ email: email.trim(), password });
+      onLogin(res.user.email, res.user.name, res.user.organization || undefined);
       showToast('Authentication successful. Welcome to Sovereign AI.');
       navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed.');
+    } finally {
       setLoading(false);
-    }, 800);
+    }
   }
 
   function demoLogin() {
     setLoading(true);
-    window.setTimeout(() => {
-      localStorage.setItem('sovereign-auth', 'true');
-      localStorage.setItem('sovereign-user-email', 'demo@sovereign.ai');
-      onLogin('demo@sovereign.ai');
-      showToast('Demo workspace opened');
-      navigate('/');
-      setLoading(false);
-    }, 450);
+    authService.setToken('demo-sovereign-token');
+    authService.setSavedUser({
+      id: 'demo-user-1',
+      email: 'demo@sovereign.ai',
+      name: 'Demo Operator',
+      organization: 'Sovereign Industrial',
+      role: 'operator',
+    });
+    onLogin('demo@sovereign.ai', 'Demo Operator', 'Sovereign Industrial');
+    showToast('Demo workspace opened');
+    navigate('/');
+    setLoading(false);
   }
 
-  function submitSignup(e: FormEvent) {
+  async function submitSignup(e: FormEvent) {
     e.preventDefault();
     setError('');
     const form = e.currentTarget as HTMLFormElement;
@@ -113,20 +123,25 @@ export function Login({ onLogin }: LoginProps) {
     if (!name) return setError('Full name is required.');
     if (!organization) return setError('Organization is required.');
     if (!/^\S+@\S+\.\S+$/.test(signupEmail)) return setError('Enter a valid work email.');
-    if (signupPassword.length < 4) return setError('Password must contain at least 4 characters.');
+    if (signupPassword.length < 6) return setError('Password must contain at least 6 characters.');
     if (signupPassword !== confirmPassword) return setError('Passwords do not match.');
 
     setLoading(true);
-    window.setTimeout(() => {
-      localStorage.setItem('sovereign-auth', 'true');
-      localStorage.setItem('sovereign-user-email', signupEmail);
-      localStorage.setItem('sovereign-user-name', name);
-      localStorage.setItem('sovereign-user-organization', organization);
-      onLogin(signupEmail);
+    try {
+      const res = await authService.register({
+        name,
+        email: signupEmail,
+        password: signupPassword,
+        organization,
+      });
+      onLogin(res.user.email, res.user.name, res.user.organization || undefined);
       showToast('Account created successfully');
       navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'Registration failed.');
+    } finally {
       setLoading(false);
-    }, 700);
+    }
   }
 
   function submitForgot(e: FormEvent) {

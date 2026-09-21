@@ -175,6 +175,11 @@ export function Chat({ session, onAddMessage, onUpdateMessage }: ChatProps) {
               addStep({ id: nextStepId(), label: `Error: ${error}`, status: 'done' });
             },
           },
+          {
+            sessionId: session.id,
+            images: attachments.filter(a => a.type === 'image' && (a.dataUrl || a.url)).map(a => a.dataUrl || a.url!),
+            documents: attachments.filter(a => a.type !== 'image' && (a.dataUrl || a.url)).map(a => a.dataUrl || a.url!),
+          },
         );
 
         onUpdateMessage(session.id, aiMsgId, {

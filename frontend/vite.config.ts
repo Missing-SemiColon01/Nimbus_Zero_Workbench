@@ -36,7 +36,19 @@ export default defineConfig(({ mode }) => {
       watch: {
         ignored: [
           '**/.figma/**',
-],
+        ],
+      },
+      proxy: {
+        '/api/v1': {
+          target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/auth': {
+          target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
+          changeOrigin: true,
+          secure: false,
+        },
       },
     },
     preview: {
