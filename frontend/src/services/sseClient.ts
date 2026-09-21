@@ -112,7 +112,7 @@ export async function streamTask(
         if (!dataLine) continue
 
         const jsonStr = dataLine.slice("data: ".length)
-        let event: { type: string payload?: Record<string, unknown> }
+        let event: { type: string; payload?: Record<string, unknown> }
         try {
           event = JSON.parse(jsonStr)
         } catch {
@@ -128,7 +128,7 @@ export async function streamTask(
 }
 
 function dispatchEvent(
-  event: { type: string payload?: Record<string, unknown> },
+  event: { type: string; payload?: Record<string, unknown> },
   cb: StreamCallbacks,
 ): void {
   const p = event.payload ?? {}
