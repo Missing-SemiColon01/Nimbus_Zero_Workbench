@@ -37,13 +37,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_COLLECTION_NAME: str = "sovereign_knowledge"
 DEFAULT_STORAGE_PATH: Path = Path("data/knowledge/qdrant")
 
-# HNSW index parameters optimized for high-end GPU / large scale
-DEFAULT_HNSW_CONFIG: dict = {
-    "m": 32,              # Max connections per node (higher = better recall, more memory)
-    "ef_construct": 256,  # Construction time/accuracy tradeoff (higher = better index)
-    "full_scan_threshold": 10000,  # Switch to exact search below this many vectors
-}
-
 
 @dataclass
 class SearchResult:
@@ -70,12 +63,10 @@ class VectorStore:
         storage_path: Path | str | None = DEFAULT_STORAGE_PATH,
         embedder: LocalEmbedder | None = None,
         dimension: int = EMBEDDING_DIMENSION,
-        hnsw_config: dict | None = None,
     ) -> None:
         self.collection_name = collection_name
         self.dimension = dimension
         self.embedder = embedder or get_embedder()
-        self.hnsw_config = hnsw_config or DEFAULT_HNSW_CONFIG
 
         # Initialize Qdrant client in local disk mode or memory mode
         if storage_path == ":memory:":
@@ -92,7 +83,7 @@ class VectorStore:
         self._ensure_collection()
 
     def _ensure_collection(self) -> None:
-        """Create Qdrant collection with cosine distance and optimized HNSW index if it does not already exist."""
+        """Create Qdrant collection with cosine distance if it does not already exist."""
         exists = self.client.collection_exists(collection_name=self.collection_name)
         if not exists:
             self.client.create_collection(
@@ -100,20 +91,9 @@ class VectorStore:
                 vectors_config=models.VectorParams(
                     size=self.dimension,
                     distance=models.Distance.COSINE,
-                    hnsw_config=models.HnswConfigDiff(
-                        m=self.hnsw_config["m"],
-                        ef_construct=self.hnsw_config["ef_construct"],
-                        full_scan_threshold=self.hnsw_config["full_scan_threshold"],
-                    ),
                 ),
             )
-            logger.info(
-                "Created Qdrant collection '%s' (dim=%d, distance=COSINE, HNSW: m=%d, ef_construct=%d).",
-                self.collection_name,
-                self.dimension,
-                self.hnsw_config["m"],
-                self.hnsw_config["ef_construct"],
-            )
+            logger.info("Created Qdrant collection '%s' (dim=%d, distance=COSINE).", self.collection_name, self.dimension)
 
     def count(self) -> int:
         """Return total number of points stored in this collection."""
@@ -197,7 +177,6 @@ class VectorStore:
         top_k: int = 5,
         score_threshold: float | None = None,
         filter_doc_id: str | None = None,
-        ef: int = 128,  # Runtime ef parameter for HNSW (higher = better recall, slower search)
     ) -> list[SearchResult]:
         """
         Search for closest chunks given a precomputed query vector.
@@ -212,9 +191,6 @@ class VectorStore:
             Optional minimum cosine similarity cutoff [0.0 - 1.0].
         filter_doc_id:
             Optional document_id to restrict search scope.
-        ef:
-            HNSW runtime search parameter (default: 128). Higher values improve recall
-            at the cost of search latency. Recommended: 128-256 for production.
 
         Returns
         -------
@@ -238,10 +214,6 @@ class VectorStore:
             query_filter=query_filter,
             limit=top_k,
             score_threshold=score_threshold,
-            search_params=models.SearchParams(
-                hnsw_ef=ef,
-                exact=False,  # Use approximate search for speed
-            ),
         )
 
         results: list[SearchResult] = []
@@ -267,7 +239,6 @@ class VectorStore:
         top_k: int = 5,
         score_threshold: float | None = None,
         filter_doc_id: str | None = None,
-        ef: int = 128,
     ) -> list[SearchResult]:
         """
         Semantic search for relevant chunks given a natural language query string.
@@ -282,8 +253,6 @@ class VectorStore:
             Optional minimum similarity score cutoff.
         filter_doc_id:
             Optional document_id filter.
-        ef:
-            HNSW runtime search parameter for better recall (default: 128).
 
         Returns
         -------
@@ -296,7 +265,6 @@ class VectorStore:
             top_k=top_k,
             score_threshold=score_threshold,
             filter_doc_id=filter_doc_id,
-            ef=ef,
         )
 
     def delete_document(self, document_id: str) -> None:

@@ -147,8 +147,8 @@ def _load_image(image_input: Image.Image | Path | str | bytes) -> Image.Image:
 def ocr_image(
     image: Image.Image | Path | str | bytes,
     lang: str = "eng",
-    psm: int = 6,  # PSM 6 = Assume a single uniform block of text (better for documents)
-    compute_confidence: bool = True,  # Enable confidence by default for quality
+    psm: int = 3,
+    compute_confidence: bool = False,
 ) -> OCRResult:
     """
     Extract text from an image using Tesseract OCR.
@@ -160,12 +160,9 @@ def ocr_image(
     lang:
         Tesseract language code (default: 'eng').
     psm:
-        Page segmentation mode (default: 6 - Assume a single uniform block of text).
-        PSM 3 = Fully automatic page segmentation (original)
-        PSM 6 = Assume a single uniform block of text (better for documents)
+        Page segmentation mode (default: 3 - Fully automatic page segmentation).
     compute_confidence:
         If True, calculates average word-level confidence score [0.0 - 100.0].
-        Enabled by default for quality assessment.
 
     Returns
     -------
