@@ -177,6 +177,15 @@ class OllamaProvider(ModelProvider):
             tool_calls=tool_calls,
         )
 
+    @staticmethod
+    def _clean_base64_image(data: str) -> str:
+        """Ensure base64 image strings do not have data URI scheme prefixes before sending to Ollama."""
+        if isinstance(data, str) and data.startswith("data:") and ";base64," in data:
+            return data.split(";base64,", 1)[1]
+        if isinstance(data, str) and data.startswith("data:") and "," in data:
+            return data.split(",", 1)[1]
+        return data
+
     def _build_payload(self, model: ModelDefinition, request: ModelRequest, *, stream: bool) -> dict[str, Any]:
         messages = normalize_messages(request.messages, request.prompt, request.images)
         payload: dict[str, Any] = {
@@ -185,7 +194,7 @@ class OllamaProvider(ModelProvider):
                 {
                     "role": message.role,
                     "content": message.content,
-                    **({"images": message.images} if message.images else {}),
+                    **({"images": [self._clean_base64_image(img) for img in message.images]} if message.images else {}),
                 }
                 for message in messages
             ],

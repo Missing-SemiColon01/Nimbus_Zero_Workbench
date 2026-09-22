@@ -549,9 +549,16 @@ class AgentRuntime:
     def _build_request_messages(state: AgentGraphState) -> list[ChatMessage]:
         """Convert graph state messages to ModelRequest ChatMessage list."""
         msgs = state.get("messages", [])
-        if not msgs:
-            return []
         result: list[ChatMessage] = []
+
+        system_prompt = state.get("system_prompt")
+        has_system = any(
+            (m.role == "system" if isinstance(m, ChatMessage) or (hasattr(m, "role") and not isinstance(m, dict)) else m.get("role") == "system")
+            for m in msgs
+        )
+        if system_prompt and not has_system:
+            result.append(ChatMessage(role="system", content=system_prompt.strip()))
+
         for m in msgs:
             if isinstance(m, ChatMessage):
                 result.append(m)
@@ -584,9 +591,19 @@ class AgentRuntime:
                 for tool_call, result in zip(tool_calls, round_results)
                 if self._requires_approval(result)
             )
+            tool_results_prompt = self._prompt_with_tool_results(self._model_prompt(state), response, round_results)
+            round_messages = self._build_request_messages(state)
+            round_messages.append(ChatMessage(role="assistant", content=response.content or "Calling tools..."))
+            round_messages.append(ChatMessage(
+                role="user",
+                content=(
+                    f"Tool execution results:\n{json.dumps([r.output if r.success else r.error for r in round_results], default=str)}\n\n"
+                    "Use the tool results above to produce the final answer. If a tool failed, explain the failure clearly."
+                ),
+            ))
             request = ModelRequest(
-                prompt=self._prompt_with_tool_results(self._model_prompt(state), response, round_results),
-                messages=self._build_request_messages(state),
+                prompt=tool_results_prompt,
+                messages=round_messages,
                 required_capabilities=initial_request.required_capabilities,
                 required_modality=initial_request.required_modality,
                 images=initial_request.images,

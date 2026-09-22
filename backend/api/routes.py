@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 import asyncio
+import base64
 import inspect
 import logging
 import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,128 @@ def _safe_upload_target(uploads_dir: Path, filename: str) -> Path:
     if not safe_name or safe_name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Uploaded file must have a valid filename.")
     return uploads_dir / safe_name
+
+
+def _process_incoming_documents(documents: list[str], uploads_dir: Path) -> tuple[list[str], str]:
+    """
+    Process incoming documents:
+    - Base64 data URLs (e.g. uploaded PDFs) are decoded and saved to uploads_dir.
+    - Plain text is extracted from PDFs (via PyMuPDF) or text files so LLMs can read and summarize them.
+    Returns (disk_document_paths, extracted_text_context).
+    """
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[str] = []
+    extracted_texts: list[str] = []
+
+    for doc in documents:
+        if not doc or not isinstance(doc, str):
+            continue
+        # Case 1: Base64 data URL
+        if doc.startswith("data:") and ";base64," in doc:
+            meta, b64_data = doc.split(";base64,", 1)
+            ext = ".pdf"
+            if "pdf" in meta:
+                ext = ".pdf"
+            elif "text" in meta or "plain" in meta:
+                ext = ".txt"
+            elif "csv" in meta:
+                ext = ".csv"
+            elif "image" in meta:
+                ext = ".png"
+            file_name = f"upload_{uuid.uuid4().hex[:8]}{ext}"
+            file_path = uploads_dir / file_name
+            try:
+                file_bytes = base64.b64decode(b64_data)
+                file_path.write_bytes(file_bytes)
+                saved_paths.append(str(file_path.resolve()))
+            except Exception as e:
+                logger.warning("Failed to decode base64 document: %s", e)
+                continue
+        # Case 2: Raw base64 PDF
+        elif doc.startswith("JVBERi0"):
+            file_name = f"upload_{uuid.uuid4().hex[:8]}.pdf"
+            file_path = uploads_dir / file_name
+            try:
+                file_bytes = base64.b64decode(doc)
+                file_path.write_bytes(file_bytes)
+                saved_paths.append(str(file_path.resolve()))
+            except Exception as e:
+                logger.warning("Failed to decode base64 PDF: %s", e)
+                continue
+        # Case 3: File path on disk
+        else:
+            p = Path(doc)
+            if p.exists():
+                saved_paths.append(str(p.resolve()))
+            else:
+                cand = uploads_dir / p.name
+                if cand.exists():
+                    saved_paths.append(str(cand.resolve()))
+                else:
+                    saved_paths.append(doc)
+
+    for path_str in saved_paths:
+        p = Path(path_str)
+        if not p.exists():
+            continue
+        if p.suffix.lower() == ".pdf":
+            try:
+                import fitz
+                pdf = fitz.open(str(p))
+                pages = []
+                for i, page in enumerate(pdf):
+                    txt = page.get_text().strip()
+                    if txt:
+                        pages.append(f"[Page {i+1}]\n{txt}")
+                pdf.close()
+                if pages:
+                    extracted_texts.append(f"--- Document Content: {p.name} ---\n" + "\n\n".join(pages))
+                else:
+                    extracted_texts.append(f"--- Document: {p.name} (scanned/image-only PDF located at {p}) ---")
+            except Exception as e:
+                logger.warning("Failed to extract text from PDF %s: %s", path_str, e)
+                extracted_texts.append(f"--- Document located at {p} ---")
+        elif p.suffix.lower() in {".txt", ".csv", ".md", ".json"}:
+            try:
+                content = p.read_text(errors="replace")
+                if content:
+                    extracted_texts.append(f"--- Document Content: {p.name} ---\n{content}")
+            except Exception:
+                pass
+
+    doc_context = "\n\n".join(extracted_texts)
+    return saved_paths, doc_context
+
+
+def _process_incoming_images(images: list[str], uploads_dir: Path) -> tuple[list[str], list[str]]:
+    """Save base64 images to uploads_dir and return (base64_images, disk_image_paths)."""
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    b64_list: list[str] = []
+    disk_paths: list[str] = []
+    for img in images:
+        if not img or not isinstance(img, str):
+            continue
+        if img.startswith("data:") and ";base64," in img:
+            meta, b64_data = img.split(";base64,", 1)
+            ext = ".png"
+            if "jpeg" in meta or "jpg" in meta:
+                ext = ".jpg"
+            elif "webp" in meta:
+                ext = ".webp"
+            file_name = f"image_{uuid.uuid4().hex[:8]}{ext}"
+            file_path = uploads_dir / file_name
+            try:
+                file_bytes = base64.b64decode(b64_data)
+                file_path.write_bytes(file_bytes)
+                disk_paths.append(str(file_path.resolve()))
+                b64_list.append(b64_data)
+            except Exception as e:
+                logger.warning("Failed to decode base64 image: %s", e)
+        elif Path(img).exists():
+            disk_paths.append(str(Path(img).resolve()))
+        else:
+            b64_list.append(img)
+    return b64_list, disk_paths
 
 
 def _sandbox_response(output: dict[str, Any], *, success: bool, error: str | None = None) -> SandboxRunResponse:
@@ -148,12 +272,21 @@ async def audit_events(request: Request, limit: int = 100):
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreate, request: Request):
     uploads_dir: Path = request.app.state.settings.data_dir / "uploads"
-    document_paths = [
-        str(_resolve_inside(uploads_dir, document_path))
-        for document_path in payload.document_paths
-    ]
+    document_paths = []
+    for document_path in payload.document_paths:
+        try:
+            document_paths.append(str(_resolve_inside(uploads_dir, document_path)))
+        except HTTPException:
+            document_paths.append(document_path)
 
-    documents = [*payload.documents, *document_paths]
+    raw_docs = [*payload.documents, *document_paths]
+    documents, doc_context = _process_incoming_documents(raw_docs, uploads_dir)
+    images, image_paths = _process_incoming_images(payload.images or [], uploads_dir)
+
+    user_request = payload.request
+    if doc_context:
+        user_request = f"{payload.request}\n\n[Attached Document Context]:\n{doc_context}"
+
     # Artifact detection is centralized with the agent's existing artifact
     # orchestration.  It honors task_type (report/artifact) and all supported
     # artifact formats rather than routing only PDF-shaped text specially.
@@ -161,7 +294,7 @@ async def create_task(payload: TaskCreate, request: Request):
     generate_artifact = getattr(request.app.state.agent, "generate_artifact", None)
     if artifact_intent is not None and callable(generate_artifact):
         result = await generate_artifact(
-            payload.request,
+            user_request,
             task_type=payload.task_type,
             approved_tools=payload.approved_tools,
             generation_mode=payload.generation_mode,
@@ -190,18 +323,31 @@ async def create_task(payload: TaskCreate, request: Request):
         required_capabilities = {"document_understanding"}
     try:
         run_kwargs: dict[str, Any] = {
-            "images": payload.images,
+            "images": images or image_paths,
             "documents": documents,
             "approved_tools": payload.approved_tools,
         }
         sig = inspect.signature(request.app.state.agent.run)
         if "messages" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            run_kwargs["messages"] = payload.messages
+            messages = list(payload.messages or [])
+            if messages and doc_context:
+                for idx in range(len(messages) - 1, -1, -1):
+                    m = messages[idx]
+                    role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "")
+                    if role == "user":
+                        if isinstance(m, ChatMessage):
+                            messages[idx] = ChatMessage(role="user", content=user_request, images=m.images)
+                        elif isinstance(m, dict):
+                            messages[idx] = {**m, "content": user_request}
+                        elif hasattr(m, "content"):
+                            m.content = user_request
+                        break
+            run_kwargs["messages"] = messages
         if "session_id" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             run_kwargs["session_id"] = payload.session_id
 
         state, model_response = await request.app.state.agent.run(
-            payload.request,
+            user_request,
             required_capabilities,
             payload.modality,
             **run_kwargs,
@@ -272,29 +418,52 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                 )
             else:
                 uploads_dir: Path = settings.data_dir / "uploads"
-                document_paths = [
-                    str(_resolve_inside(uploads_dir, dp))
-                    for dp in payload.document_paths
-                ]
-                documents = [*payload.documents, *document_paths]
+                document_paths = []
+                for dp in payload.document_paths:
+                    try:
+                        document_paths.append(str(_resolve_inside(uploads_dir, dp)))
+                    except HTTPException:
+                        document_paths.append(dp)
+
+                raw_docs = [*payload.documents, *document_paths]
+                documents, doc_context = _process_incoming_documents(raw_docs, uploads_dir)
+                images, image_paths = _process_incoming_images(payload.images or [], uploads_dir)
+
+                user_request = payload.request
+                if doc_context:
+                    user_request = f"{payload.request}\n\n[Attached Document Context]:\n{doc_context}"
+
                 required_capabilities = payload.required_capabilities
                 if documents and payload.task_type is None and not payload.capabilities:
                     required_capabilities = {"document_understanding"}
 
                 run_kwargs: dict[str, Any] = {
-                    "images": payload.images,
+                    "images": images or image_paths,
                     "documents": documents,
                     "approved_tools": payload.approved_tools,
                     "streamer": streamer,
                 }
                 sig = inspect.signature(agent.run)
                 if "messages" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-                    run_kwargs["messages"] = payload.messages
+                    messages = list(payload.messages or [])
+                    if messages and doc_context:
+                        for idx in range(len(messages) - 1, -1, -1):
+                            m = messages[idx]
+                            role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "")
+                            if role == "user":
+                                if isinstance(m, ChatMessage):
+                                    messages[idx] = ChatMessage(role="user", content=user_request, images=m.images)
+                                elif isinstance(m, dict):
+                                    messages[idx] = {**m, "content": user_request}
+                                elif hasattr(m, "content"):
+                                    m.content = user_request
+                                break
+                    run_kwargs["messages"] = messages
                 if "session_id" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                     run_kwargs["session_id"] = payload.session_id
 
                 state, model_response = await agent.run(
-                    payload.request,
+                    user_request,
                     required_capabilities,
                     payload.modality,
                     **run_kwargs,
