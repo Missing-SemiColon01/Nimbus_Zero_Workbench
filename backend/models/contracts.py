@@ -81,14 +81,29 @@ def normalize_messages(
     prompt: str,
     images: list[str] | None = None,
 ) -> list["ChatMessage"]:
-    """Use supplied history or synthesize one user message from a legacy prompt."""
+    """Use supplied history or synthesize messages from prompt."""
     if messages:
         validate_chat_messages(messages)
         normalized = list(messages)
+        has_system = any(m.role == "system" for m in normalized)
+        if not has_system and isinstance(prompt, str) and prompt.startswith("System instructions:\n"):
+            parts = prompt.split("\n\nUser request:\n", 1)
+            sys_text = parts[0].replace("System instructions:\n", "", 1).strip()
+            if sys_text:
+                normalized.insert(0, ChatMessage(role="system", content=sys_text))
     else:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("prompt must be non-empty when messages is empty")
-        normalized = [ChatMessage(role="user", content=prompt)]
+        if prompt.startswith("System instructions:\n") and "\n\nUser request:\n" in prompt:
+            parts = prompt.split("\n\nUser request:\n", 1)
+            sys_text = parts[0].replace("System instructions:\n", "", 1).strip()
+            user_text = parts[1].strip()
+            normalized = [
+                ChatMessage(role="system", content=sys_text),
+                ChatMessage(role="user", content=user_text),
+            ]
+        else:
+            normalized = [ChatMessage(role="user", content=prompt)]
     if images:
         latest_user_index = max(
             (index for index, message in enumerate(normalized) if message.role == "user"),

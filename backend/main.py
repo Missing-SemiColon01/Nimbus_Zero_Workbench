@@ -1,4 +1,8 @@
+import os
 from contextlib import asynccontextmanager
+
+os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

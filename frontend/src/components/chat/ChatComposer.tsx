@@ -84,13 +84,12 @@ export function ChatComposer({
       type,
       size: file.size,
     }
-    if (type === "image") {
-      att.dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onload = (e) => resolve(e.target?.result as string)
-        reader.readAsDataURL(file)
-      })
-    }
+    att.dataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target?.result as string)
+      reader.readAsDataURL(file)
+    })
+    att.url = att.dataUrl
     return att
   }
 
