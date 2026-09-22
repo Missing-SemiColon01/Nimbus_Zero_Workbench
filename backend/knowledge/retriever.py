@@ -71,16 +71,20 @@ class KnowledgeRetriever:
         self,
         vector_store: VectorStore | None = None,
         embedder: LocalEmbedder | None = None,
+        default_top_k: int = 10,
+        default_ef: int = 128,
     ) -> None:
         self.embedder = embedder or get_embedder()
         self.vector_store = vector_store or get_vector_store()
+        self.default_top_k = default_top_k
+        self.default_ef = default_ef
 
     def ingest_document(
         self,
         source: str | Path,
         document_id: str | None = None,
-        chunk_size: int = 500,
-        chunk_overlap: int = 50,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
     ) -> IngestResult:
         """
         Run end-to-end ingestion on a PDF file:
@@ -204,9 +208,10 @@ class KnowledgeRetriever:
     def search(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int | None = None,
         score_threshold: float | None = None,
         filter_doc_id: str | None = None,
+        ef: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         Semantic search returning structured context dicts ready for AgentState injection.
@@ -227,9 +232,10 @@ class KnowledgeRetriever:
         """
         search_results: list[SearchResult] = self.vector_store.search(
             query=query,
-            top_k=top_k,
+            top_k=top_k or self.default_top_k,
             score_threshold=score_threshold,
             filter_doc_id=filter_doc_id,
+            ef=ef or self.default_ef,
         )
 
         context_list: list[dict[str, Any]] = []
@@ -302,12 +308,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         doc_path = sys.argv[1]
         print(f"Ingesting: {doc_path}")
-        res = retriever.ingest_document(doc_path)
+        res = retriever.ingest_document(doc_path, chunk_size=1000, chunk_overlap=200)
         print(f"Ingest Result: {res.to_dict()}")
 
     test_query = "pressure valve safety findings"
     print(f"\nSearching for: '{test_query}'")
-    hits = retriever.search(test_query, top_k=3)
+    hits = retriever.search(test_query, top_k=10, ef=128)
     if not hits:
         print("No chunks currently indexed. Ingest a document first.")
     for i, hit in enumerate(hits, 1):

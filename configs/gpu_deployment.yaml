@@ -1,0 +1,76 @@
+# Google Cloud GPU Deployment Configuration
+# 
+# This file contains optimized settings for running the Agentic AI Workbench
+# on Google Cloud with high-end GPU (e.g., A100, H100, V100, T4)
+
+# ── GPU Embedder Configuration ──────────────────────────────────────────────
+EMBEDDER_CONFIG:
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  batch_size: 128           # Large batch for GPU throughput
+  use_onnx: true            # Use ONNX Runtime GPU for INT8 inference
+  cache_dir: "data/knowledge/model_cache"
+
+# ── Vector Store (Qdrant) Configuration ───────────────────────────────────────
+VECTOR_STORE_CONFIG:
+  collection_name: "sovereign_knowledge"
+  storage_path: "data/knowledge/qdrant"
+  # HNSW Index Parameters (optimized for GPU-scale retrieval)
+  hnsw_config:
+    m: 32                   # Max connections per node (higher = better recall)
+    ef_construct: 256       # Build-time accuracy (higher = better index quality)
+    full_scan_threshold: 10000  # Exact search threshold
+  # Runtime search parameters
+  search_params:
+    ef: 128                 # Runtime ef (higher = better recall, slower)
+    exact: false            # Use approximate search
+
+# ── Retriever Configuration ───────────────────────────────────────────────────
+RETRIEVER_CONFIG:
+  default_top_k: 10         # More results for better context
+  default_ef: 128           # Default HNSW ef for search
+
+# ── PDF Parser Configuration ──────────────────────────────────────────────────
+PDF_PARSER_CONFIG:
+  min_text_chars_before_ocr: 50
+  ocr_dpi: 300              # Higher DPI for better OCR quality
+
+# ── OCR Configuration ─────────────────────────────────────────────────────────
+OCR_CONFIG:
+  lang: "eng"
+  psm: 6                    # Assume single uniform block of text
+  compute_confidence: true  # Enable confidence scoring
+
+# ── Vision Tool Configuration ─────────────────────────────────────────────────
+VISION_TOOL_CONFIG:
+  default_prompt: |
+    Examine this document image thoroughly. Transcribe all text, numbers, stamps,
+    and signatures, and describe any diagrams, charts, or defects visible.
+  pdf_render_dpi: 300       # High quality rendering for vision model
+  ocr_psm: 6
+  ocr_compute_confidence: true
+
+# ── Chunking Configuration ────────────────────────────────────────────────────
+CHUNKER_CONFIG:
+  chunk_size: 1000          # Larger chunks for better context
+  chunk_overlap: 200        # More overlap for continuity
+
+# ── RAG Tool Configuration ────────────────────────────────────────────────────
+RAG_TOOL_CONFIG:
+  default_top_k: 10
+  default_ef: 128
+  default_score_threshold: null
+
+# ── Agent Runtime Configuration ───────────────────────────────────────────────
+AGENT_RUNTIME_CONFIG:
+  timeout: 300              # 5 minutes for complex operations
+  tool_timeout: 120         # 2 minutes per tool
+  max_retries: 3
+  max_steps: 30
+  max_tool_rounds: 15       # Support multi-step RAG + OCR + Report workflows
+
+# ── Docker GPU Runtime ────────────────────────────────────────────────────────
+# Use with: docker run --gpus all --shm-size=8g ...
+DOCKER_GPU_CONFIG:
+  base_image: "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04"
+  shared_memory: "8g"       # Required for PyTorch/transformers on GPU
+  workers: 1                # Single worker for GPU memory management

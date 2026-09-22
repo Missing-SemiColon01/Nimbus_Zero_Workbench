@@ -48,10 +48,12 @@ SUPPORTED_EXTENSIONS: set[str] = {
 }
 
 
-def render_pdf_page_to_image(pdf_source: str | Path | bytes, page_number: int = 1, dpi: int = 200) -> bytes:
+def render_pdf_page_to_image(pdf_source: str | Path | bytes, page_number: int = 1, dpi: int = 300) -> bytes:
     """
     Render a specific page of a PDF file to PNG image bytes.
     page_number is 1-indexed.
+    
+    Uses 300 DPI for better quality on high-end GPU deployments.
     """
     if isinstance(pdf_source, bytes):
         doc = fitz.open(stream=pdf_source, filetype="pdf")
@@ -78,11 +80,11 @@ def render_pdf_page_to_image(pdf_source: str | Path | bytes, page_number: int = 
 def encode_image_to_base64(image_source: str | Path | bytes) -> str:
     """
     Load an image from path or bytes and return a base64-encoded ASCII string.
-    If given a PDF path or bytes, automatically renders the first page.
+    If given a PDF path or bytes, automatically renders the first page at 300 DPI.
     """
     if isinstance(image_source, bytes):
         if image_source.startswith(b"%PDF"):
-            png_bytes = render_pdf_page_to_image(image_source, page_number=1)
+            png_bytes = render_pdf_page_to_image(image_source, page_number=1, dpi=300)
             return base64.b64encode(png_bytes).decode("utf-8")
         return base64.b64encode(image_source).decode("utf-8")
 
@@ -98,7 +100,7 @@ def encode_image_to_base64(image_source: str | Path | bytes) -> str:
         )
 
     if suffix == ".pdf":
-        png_bytes = render_pdf_page_to_image(path, page_number=1)
+        png_bytes = render_pdf_page_to_image(path, page_number=1, dpi=300)
         return base64.b64encode(png_bytes).decode("utf-8")
 
     image_bytes = path.read_bytes()
@@ -207,7 +209,7 @@ class VisionAnalyzeTool(Tool):
             target_path = Path(raw_path)
             is_pdf = target_path.is_file() and target_path.suffix.lower() == ".pdf"
             if is_pdf:
-                raw_bytes = await asyncio.to_thread(render_pdf_page_to_image, target_path, page_number=page_number)
+                raw_bytes = await asyncio.to_thread(render_pdf_page_to_image, target_path, page_number=page_number, dpi=300)
                 base64_image = base64.b64encode(raw_bytes).decode("utf-8")
             else:
                 base64_image = encode_image_to_base64(raw_path)
@@ -223,9 +225,10 @@ class VisionAnalyzeTool(Tool):
         # 2. Extract OCR text from the rendered image / document
         ocr_text = ""
         try:
-            ocr_result = await asyncio.to_thread(ocr_image, raw_bytes)
+            ocr_result = await asyncio.to_thread(ocr_image, raw_bytes, psm=6, compute_confidence=True)
             if ocr_result.has_text:
                 ocr_text = ocr_result.text.strip()
+                logger.debug("OCR extracted %d chars with confidence %.1f", len(ocr_text), ocr_result.confidence or 0)
         except Exception as ocr_exc:
             logger.warning("OCR extraction during vision analysis failed: %s", ocr_exc)
 

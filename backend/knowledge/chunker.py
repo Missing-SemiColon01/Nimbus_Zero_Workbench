@@ -156,8 +156,8 @@ def chunk_text(
     filename: str = "document",
     page_number: int = 1,
     document_id: str | None = None,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = 1000,  # Increased for better context on large documents
+    chunk_overlap: int = 200,  # Increased overlap for continuity
     start_index: int = 0,
     extra_metadata: dict[str, Any] | None = None,
 ) -> list[Chunk]:
@@ -272,8 +272,8 @@ def chunk_text(
 
 def chunk_document(
     doc: ParsedDocument,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = 1000,  # Increased for better context on large documents
+    chunk_overlap: int = 200,  # Increased overlap for continuity
     document_id: str | None = None,
 ) -> list[Chunk]:
     """

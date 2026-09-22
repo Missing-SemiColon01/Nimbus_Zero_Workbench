@@ -33,13 +33,17 @@ logger = logging.getLogger(__name__)
 class RAGSearchTool(Tool):
     """
     Autonomous tool for semantic search across ingested sovereign documents.
+    
+    Optimized for Google Cloud GPU:
+    - Higher default top_k (10) for better recall
+    - Configurable HNSW ef parameter for search accuracy
     """
 
     name = "rag.search"
     description = (
         "Search the sovereign knowledge base (inspection reports, technical specs, manuals) "
         "using semantic vector search. Returns relevant text chunks with exact page numbers "
-        "and source filenames for audit citations."
+        "and source filenames for audit citations. Optimized for large document collections."
     )
     parameters = {
         "type": "object",
@@ -50,8 +54,8 @@ class RAGSearchTool(Tool):
             },
             "top_k": {
                 "type": "integer",
-                "description": "Maximum number of relevant chunks to retrieve (default: 5).",
-                "default": 5,
+                "description": "Maximum number of relevant chunks to retrieve (default: 10, optimized for GPU).",
+                "default": 10,
             },
             "document_id": {
                 "type": "string",
@@ -60,6 +64,11 @@ class RAGSearchTool(Tool):
             "score_threshold": {
                 "type": "number",
                 "description": "Optional minimum similarity score cutoff (0.0 to 1.0).",
+            },
+            "ef": {
+                "type": "integer",
+                "description": "HNSW search parameter for recall vs speed tradeoff (default: 128). Higher = better recall.",
+                "default": 128,
             },
         },
         "required": ["query"],
@@ -75,7 +84,7 @@ class RAGSearchTool(Tool):
         Parameters
         ----------
         arguments:
-            Dict containing 'query', optional 'top_k', 'document_id', 'score_threshold'.
+            Dict containing 'query', optional 'top_k', 'document_id', 'score_threshold', 'ef'.
         context:
             Execution context, optionally containing 'state' (AgentState) or 'retrieved_context'.
 
@@ -92,11 +101,13 @@ class RAGSearchTool(Tool):
                 error="Argument 'query' is required and must be a non-empty string.",
             )
 
-        top_k = int(arguments.get("top_k", 5))
+        top_k = int(arguments.get("top_k", 10))
         document_id = arguments.get("document_id")
         score_threshold = arguments.get("score_threshold")
         if score_threshold is not None:
             score_threshold = float(score_threshold)
+        
+        ef = int(arguments.get("ef", 128))
 
         try:
             hits = await asyncio.to_thread(
@@ -105,12 +116,13 @@ class RAGSearchTool(Tool):
                 top_k=top_k,
                 score_threshold=score_threshold,
                 filter_doc_id=document_id,
+                ef=ef,
             )
 
             # Sync with AgentState if present in execution context
             self._sync_context(hits, context)
 
-            logger.info("rag.search executed for query '%s' -> %d hits", query, len(hits))
+            logger.info("rag.search executed for query '%s' -> %d hits (ef=%d)", query, len(hits), ef)
             return ToolResult(
                 success=True,
                 output=hits,

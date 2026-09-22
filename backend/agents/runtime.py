@@ -28,12 +28,12 @@ from backend.agents.events import AgentEventStreamer
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    timeout: float = 60.0
-    tool_timeout: float = 30.0
+    timeout: float = 300.0
+    tool_timeout: float = 120.0
     tool_allowlist: frozenset[str] | None = None
-    max_retries: int = 2
-    max_steps: int = 15
-    max_tool_rounds: int = 3
+    max_retries: int = 3
+    max_steps: int = 30
+    max_tool_rounds: int = 15
 
 
 def detect_cycle(history: list[str], min_repetitions: int = 3) -> bool:

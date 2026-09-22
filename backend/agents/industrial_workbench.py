@@ -45,11 +45,11 @@ class IndustrialWorkbenchAgentConfig:
     id: str = AGENT_ID
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     tools: frozenset[str] | None = None
-    timeout: float = 60.0
-    tool_timeout: float = 30.0
-    max_retries: int = 2
-    max_steps: int = 15
-    max_tool_rounds: int = 3
+    timeout: float = 300.0
+    tool_timeout: float = 120.0
+    max_retries: int = 3
+    max_steps: int = 30
+    max_tool_rounds: int = 15
 
     @classmethod
     def from_yaml(cls, path: Path, agent_id: str = AGENT_ID) -> "IndustrialWorkbenchAgentConfig":

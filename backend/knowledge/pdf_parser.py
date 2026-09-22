@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 _MIN_TEXT_CHARS_BEFORE_OCR: int = 50
 
 # DPI used when rendering a page to a bitmap for Tesseract.
-# 200 is a solid trade-off between quality and speed on a dev laptop.
-_OCR_DPI: int = 200
+# 300 DPI provides better OCR quality on high-end GPU, 200 is faster.
+# Use 300 for production Google Cloud GPU deployments.
+_OCR_DPI: int = 300
 
 
 # -- data contracts ------------------------------------------------------------
@@ -86,7 +87,7 @@ def _ocr_page(page: fitz.Page, dpi: int = _OCR_DPI) -> str:
     from backend.knowledge.ocr import ocr_image
 
     pil_image = _render_page_to_pil(page, dpi)
-    result = ocr_image(pil_image)
+    result = ocr_image(pil_image, psm=6, compute_confidence=True)
     return result.text if result.has_text else ""
 
 
