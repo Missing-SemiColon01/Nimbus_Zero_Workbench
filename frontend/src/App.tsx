@@ -110,7 +110,7 @@ function AppInner() {
   }
 
   const isChatPage = location.pathname === "/"
-  const sessionTitle = activeSession?.title || "Sovereign AI Workbench"
+  const sessionTitle = activeSession?.title || "Nimbus Zero Workbench"
 
   function handleSidebarToggle() {
     if (isMobile) {

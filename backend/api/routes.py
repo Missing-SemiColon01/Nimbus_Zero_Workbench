@@ -77,13 +77,35 @@ def _process_incoming_documents(documents: list[str], uploads_dir: Path) -> tupl
                 ext = ".pdf"
             elif "word" in meta or "docx" in meta or "document" in meta:
                 ext = ".docx"
+            elif "sheet" in meta or "excel" in meta or "xlsx" in meta or "spreadsheet" in meta:
+                ext = ".xlsx"
+            elif "presentation" in meta or "powerpoint" in meta or "pptx" in meta:
+                ext = ".pptx"
             elif "text" in meta or "plain" in meta:
                 ext = ".txt"
             elif "csv" in meta:
                 ext = ".csv"
+            elif "json" in meta:
+                ext = ".json"
+            elif "markdown" in meta or "md" in meta:
+                ext = ".md"
             elif "image" in meta:
                 ext = ".png"
-            file_name = f"upload_{uuid.uuid4().hex[:8]}{ext}"
+
+            file_name = None
+            if "name=" in meta:
+                try:
+                    import urllib.parse
+                    raw_name = meta.split("name=", 1)[1].split(";", 1)[0]
+                    decoded_name = urllib.parse.unquote(raw_name)
+                    safe_name = Path(decoded_name).name
+                    if safe_name and safe_name not in {".", ".."}:
+                        file_name = f"upload_{uuid.uuid4().hex[:6]}_{safe_name}"
+                except Exception:
+                    pass
+            if not file_name:
+                file_name = f"upload_{uuid.uuid4().hex[:8]}{ext}"
+
             file_path = uploads_dir / file_name
             try:
                 file_bytes = base64.b64decode(b64_data)
@@ -148,6 +170,53 @@ def _process_incoming_documents(documents: list[str], uploads_dir: Path) -> tupl
             except Exception as e:
                 logger.warning("Failed to extract text from DOCX %s: %s", path_str, e)
                 extracted_texts.append(f"--- Document located at {p} ---")
+        elif p.suffix.lower() in {".xlsx", ".xls"}:
+            try:
+                import zipfile, xml.etree.ElementTree as ET
+                with zipfile.ZipFile(str(p)) as z:
+                    shared_strings = []
+                    if "xl/sharedStrings.xml" in z.namelist():
+                        root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+                        for si in root.findall("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}si"):
+                            text = "".join(t.text or "" for t in si.iter("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t"))
+                            shared_strings.append(text)
+                    lines = []
+                    sheet_files = [n for n in z.namelist() if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")]
+                    for sheet_file in sheet_files[:3]:
+                        root = ET.fromstring(z.read(sheet_file))
+                        for row in root.iter("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row"):
+                            row_vals = []
+                            for c in row.findall("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}c"):
+                                val = c.find("{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v")
+                                t = c.get("t")
+                                if val is not None and val.text:
+                                    if t == "s" and int(val.text) < len(shared_strings):
+                                        row_vals.append(shared_strings[int(val.text)])
+                                    else:
+                                        row_vals.append(val.text)
+                            if row_vals:
+                                lines.append(" | ".join(row_vals))
+                    if lines:
+                        extracted_texts.append(f"--- Document Content: {p.name} (Spreadsheet) ---\n" + "\n".join(lines[:100]))
+            except Exception as e:
+                logger.warning("Failed to extract text from spreadsheet %s: %s", path_str, e)
+                extracted_texts.append(f"--- Document located at {p} ---")
+        elif p.suffix.lower() in {".pptx", ".ppt"}:
+            try:
+                import zipfile, xml.etree.ElementTree as ET
+                with zipfile.ZipFile(str(p)) as z:
+                    lines = []
+                    slide_files = sorted([n for n in z.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")])
+                    for idx, slide_name in enumerate(slide_files, 1):
+                        root = ET.fromstring(z.read(slide_name))
+                        texts = [elem.text for elem in root.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t") if elem.text]
+                        if texts:
+                            lines.append(f"[Slide {idx}]\n" + "\n".join(texts))
+                    if lines:
+                        extracted_texts.append(f"--- Document Content: {p.name} (Presentation) ---\n" + "\n\n".join(lines))
+            except Exception as e:
+                logger.warning("Failed to extract text from presentation %s: %s", path_str, e)
+                extracted_texts.append(f"--- Document located at {p} ---")
         elif p.suffix.lower() in {".txt", ".csv", ".md", ".json"}:
             try:
                 content = p.read_text(errors="replace")
@@ -175,7 +244,27 @@ def _process_incoming_images(images: list[str], uploads_dir: Path) -> tuple[list
                 ext = ".jpg"
             elif "webp" in meta:
                 ext = ".webp"
-            file_name = f"image_{uuid.uuid4().hex[:8]}{ext}"
+            elif "gif" in meta:
+                ext = ".gif"
+            elif "svg" in meta:
+                ext = ".svg"
+            elif "bmp" in meta:
+                ext = ".bmp"
+
+            file_name = None
+            if "name=" in meta:
+                try:
+                    import urllib.parse
+                    raw_name = meta.split("name=", 1)[1].split(";", 1)[0]
+                    decoded_name = urllib.parse.unquote(raw_name)
+                    safe_name = Path(decoded_name).name
+                    if safe_name and safe_name not in {".", ".."}:
+                        file_name = f"image_{uuid.uuid4().hex[:6]}_{safe_name}"
+                except Exception:
+                    pass
+            if not file_name:
+                file_name = f"image_{uuid.uuid4().hex[:8]}{ext}"
+
             file_path = uploads_dir / file_name
             try:
                 file_bytes = base64.b64decode(b64_data)
@@ -188,7 +277,15 @@ def _process_incoming_images(images: list[str], uploads_dir: Path) -> tuple[list
             disk_paths.append(str(Path(img).resolve()))
         else:
             clean_b64 = img.split(",", 1)[1] if (img.startswith("data:") and "," in img) else img
-            b64_list.append(clean_b64)
+            file_name = f"image_{uuid.uuid4().hex[:8]}.png"
+            file_path = uploads_dir / file_name
+            try:
+                file_bytes = base64.b64decode(clean_b64)
+                file_path.write_bytes(file_bytes)
+                disk_paths.append(str(file_path.resolve()))
+                b64_list.append(clean_b64)
+            except Exception as e:
+                logger.warning("Failed to decode raw base64 image: %s", e)
     return b64_list, disk_paths
 
 
@@ -473,9 +570,11 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                     session_id=payload.session_id,
                 )
             else:
-                required_capabilities = payload.required_capabilities
+                required_capabilities = set(payload.required_capabilities)
+                if (images or image_paths) and payload.task_type is None and not payload.capabilities:
+                    required_capabilities.add("vision")
                 if documents and payload.task_type is None and not payload.capabilities:
-                    required_capabilities = {"document_understanding"}
+                    required_capabilities.add("document_understanding")
 
                 run_kwargs: dict[str, Any] = {
                     "images": images or image_paths,

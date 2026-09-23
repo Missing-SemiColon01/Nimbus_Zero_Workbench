@@ -1,7 +1,7 @@
 /**
  * frontend/src/services/systemService.ts
  *
- * Telemetry and system health service for the Sovereign AI Workbench.
+ * Telemetry and system health service for the Nimbus Zero Workbench.
  */
 
 import { apiRequest } from "./apiClient"

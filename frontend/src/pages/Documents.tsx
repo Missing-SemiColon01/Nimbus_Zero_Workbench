@@ -199,7 +199,7 @@ export function Documents() {
             <div className="text-center py-16 text-[var(--text-muted)] text-sm">
               {search
                 ? "No documents match your search"
-                : "No deliverables generated yet. Ask Sovereign AI in Chat to create a presentation (.pptx), report (.docx/.pdf), or spreadsheet (.xlsx)."}
+                : "No deliverables generated yet. Ask Nimbus Zero in Chat to create a presentation (.pptx), report (.docx/.pdf), or spreadsheet (.xlsx)."}
             </div>
           ) : (
             <div className="flex flex-col gap-2">

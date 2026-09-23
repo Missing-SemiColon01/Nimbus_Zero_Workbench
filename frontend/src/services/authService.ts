@@ -1,7 +1,7 @@
 /**
  * frontend/src/services/authService.ts
  *
- * Authentication service for the Sovereign AI Workbench.
+ * Authentication service for the Nimbus Zero Workbench.
  * Handles user registration, login, JWT token persistence, and profile verification.
  */
 

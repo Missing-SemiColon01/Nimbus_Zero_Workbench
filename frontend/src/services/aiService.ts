@@ -80,7 +80,7 @@ Surface degradation consistent with extended operational use beyond recommended 
 ### RECOMMENDED ACTION
 Schedule physical inspection within the next 72 hours. Replace seals and apply corrosion inhibitor. Plan for full component replacement at next scheduled maintenance window.`,
 
-  general: `I've processed your request using the Sovereign AI Engine.
+  general: `I've processed your request using the Nimbus Zero Engine.
 
 ## ANALYSIS COMPLETE
 

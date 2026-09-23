@@ -22,7 +22,7 @@ const SECURITY_CARDS = [
     subtitle: "All AI inference runs locally",
     color: "var(--success)",
     detail:
-      "The Sovereign AI Engine runs entirely on your organization's infrastructure. Model weights, inference, and data processing never leave your network boundary. GPU compute is allocated from your on-premise hardware pool.",
+      "The Nimbus Zero Engine runs entirely on your organization's infrastructure. Model weights, inference, and data processing never leave your network boundary. GPU compute is allocated from your on-premise hardware pool.",
   },
   {
     id: "no-external",
@@ -31,7 +31,7 @@ const SECURITY_CARDS = [
     subtitle: "Zero cloud API calls",
     color: "var(--accent)",
     detail:
-      "Sovereign AI does not call any external AI APIs including OpenAI, Anthropic, Google, or any other cloud provider. The system is fully air-gapped from external AI services and operates independently.",
+      "Nimbus Zero does not call any external AI APIs including OpenAI, Anthropic, Google, or any other cloud provider. The system is fully air-gapped from external AI services and operates independently.",
   },
   {
     id: "encrypted",
@@ -125,7 +125,7 @@ export function Security() {
                 </div>
               </div>
               <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-1">
-                Air-Gapped Sovereign Environment Active
+                Air-Gapped Nimbus Zero Environment Active
               </h2>
               <p className="text-sm text-[var(--text-muted)] max-w-md mx-auto">
                 All data, inference, and embeddings remain strictly within your

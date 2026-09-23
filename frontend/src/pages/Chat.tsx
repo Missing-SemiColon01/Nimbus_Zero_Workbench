@@ -250,10 +250,22 @@ export function Chat({
             sessionId: targetSessionId,
             images: attachments
               .filter((a) => a.type === "image" && (a.dataUrl || a.url))
-              .map((a) => a.dataUrl || a.url!),
+              .map((a) => {
+                const url = a.dataUrl || a.url!
+                if (url.startsWith("data:") && a.name && !url.includes("name=")) {
+                  return url.replace("data:", `data:name=${encodeURIComponent(a.name)};`)
+                }
+                return url
+              }),
             documents: attachments
               .filter((a) => a.type !== "image" && (a.dataUrl || a.url))
-              .map((a) => a.dataUrl || a.url!),
+              .map((a) => {
+                const url = a.dataUrl || a.url!
+                if (url.startsWith("data:") && a.name && !url.includes("name=")) {
+                  return url.replace("data:", `data:name=${encodeURIComponent(a.name)};`)
+                }
+                return url
+              }),
           },
         )
 
@@ -274,7 +286,7 @@ export function Chat({
         if (!controller.signal.aborted) {
           const errorMsg =
             err?.message ||
-            "Unable to connect to Sovereign backend at http://localhost:8000. Please ensure the backend is running."
+            "Unable to connect to Nimbus Zero backend at http://localhost:8000. Please ensure the backend is running."
           onUpdateMessage(targetSessionId, aiMsgId, {
             content: accumulated || errorMsg,
             agentSteps:

@@ -137,7 +137,7 @@ export function KnowledgeBase() {
               Knowledge Base
             </h1>
             <p className="text-sm text-[var(--text-muted)]">
-              Indexed sovereign documents available for local RAG & AI retrieval
+              Indexed Nimbus Zero documents available for local RAG & AI retrieval
             </p>
           </div>
           <div>

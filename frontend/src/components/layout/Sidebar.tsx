@@ -184,7 +184,7 @@ export function Sidebar({
             </div>
             <div>
               <div className="text-sm font-semibold text-[var(--text-primary)] leading-tight">
-                Sovereign AI
+                Nimbus Zero
               </div>
               <div className="text-[10px] font-medium tracking-widest text-[var(--text-muted)] uppercase leading-tight">
                 On-Premise

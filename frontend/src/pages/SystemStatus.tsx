@@ -70,7 +70,7 @@ export function SystemStatus() {
           </button>
         </div>
 
-        {/* Sovereign Mode Banner */}
+        {/* Nimbus Zero Mode Banner */}
         <div className="p-4 rounded-2xl bg-[var(--success)]/5 border border-[var(--success)]/20 mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[var(--success)]/10 flex items-center justify-center text-[var(--success)]">
@@ -78,7 +78,7 @@ export function SystemStatus() {
             </div>
             <div>
               <div className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                Sovereign Mode Active
+                Nimbus Zero Mode Active
                 <span className="px-1.5 py-0.5 rounded bg-[var(--success)]/20 text-[var(--success)] text-[10px] font-bold">
                   AIR-GAPPED
                 </span>
@@ -101,7 +101,7 @@ export function SystemStatus() {
             <Server size={18} className="text-[var(--accent)] flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-[var(--text-primary)]">
-                FastAPI Sovereign Engine
+                FastAPI Nimbus Zero Engine
               </div>
               <div className="text-[11px] text-[var(--text-muted)]">
                 Port 8000 · REST & SSE Streamer
@@ -135,7 +135,7 @@ export function SystemStatus() {
         <div className="mb-6 p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)]">
           <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-primary)] mb-3 pb-2 border-b border-[var(--border-color)]">
             <Brain size={14} className="text-[var(--accent)]" />
-            Registered Sovereign Models ({models.length})
+            Registered Nimbus Zero Models ({models.length})
           </div>
           {models.length === 0 ? (
             <div className="text-xs text-[var(--text-muted)] py-2">
@@ -167,7 +167,7 @@ export function SystemStatus() {
           )}
         </div>
 
-        {/* Sovereign Tool Registry */}
+        {/* Nimbus Zero Tool Registry */}
         <div className="p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border-color)]">
           <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-primary)] mb-3 pb-2 border-b border-[var(--border-color)]">
             <Wrench size={14} className="text-[var(--accent)]" />

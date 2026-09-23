@@ -22,7 +22,7 @@ type LoginProps = {
   onLogin: (email: string, name?: string, organization?: string) => void
 }
 
-function SovereignMark({ size = 48 }: { size?: number }) {
+function NimbusMark({ size = 48 }: { size?: number }) {
   return (
     <div
       className="sovereign-mark"
@@ -90,7 +90,7 @@ export function Login({ onLogin }: LoginProps) {
     try {
       const res = await authService.login({ email: email.trim(), password })
       onLogin(res.user.email, res.user.name, res.user.organization || undefined)
-      showToast("Authentication successful. Welcome to Sovereign AI.")
+      showToast("Authentication successful. Welcome to Nimbus Zero.")
       navigate("/")
     } catch (err: any) {
       setError(err.message || "Invalid email or password.")
@@ -112,7 +112,7 @@ export function Login({ onLogin }: LoginProps) {
     try {
       const res = await authService.login({ email: email.trim(), password })
       onLogin(res.user.email, res.user.name, res.user.organization || undefined)
-      showToast("Authentication successful. Welcome to Sovereign AI.")
+      showToast("Authentication successful. Welcome to Nimbus Zero.")
       navigate("/")
     } catch (err: any) {
       setError(err.message || "Authentication failed.")
@@ -126,12 +126,12 @@ export function Login({ onLogin }: LoginProps) {
     authService.setToken("demo-sovereign-token")
     authService.setSavedUser({
       id: "demo-user-1",
-      email: "demo@sovereign.ai",
+      email: "demo@nimbuszero.ai",
       name: "Demo Operator",
-      organization: "Sovereign Industrial",
+      organization: "Nimbus Zero Industrial",
       role: "operator",
     })
-    onLogin("demo@sovereign.ai", "Demo Operator", "Sovereign Industrial")
+    onLogin("demo@nimbuszero.ai", "Demo Operator", "Nimbus Zero Industrial")
     showToast("Demo workspace opened")
     navigate("/")
     setLoading(false)
@@ -206,10 +206,10 @@ export function Login({ onLogin }: LoginProps) {
           className="sovereign-brand"
           type="button"
           onClick={() => resetMode("login")}
-          aria-label="Sovereign AI home"
+          aria-label="Nimbus Zero home"
         >
-          <SovereignMark size={44} />
-          <span>Sovereign AI</span>
+          <NimbusMark size={44} />
+          <span>Nimbus Zero</span>
         </button>
         <div className="sovereign-header-right">
           <span>On-Premise</span>
@@ -234,7 +234,7 @@ export function Login({ onLogin }: LoginProps) {
           <div className="sovereign-kicker">YOUR PRIVATE AI WORKBENCH</div>
           <h1>
             AI for a<br />
-            <span>Sovereign Tomorrow</span>
+            <span>Nimbus Zero Tomorrow</span>
           </h1>
           <p className="sovereign-hero-copy">
             Secure. Local. Intelligent.
@@ -284,7 +284,7 @@ export function Login({ onLogin }: LoginProps) {
           </div>
 
           <div className="sovereign-quote">
-            “Sovereign AI — Intelligence
+            “Nimbus Zero — Intelligence
             <br />
             that works for you, on your terms.”
             <span />
@@ -317,7 +317,7 @@ export function Login({ onLogin }: LoginProps) {
         <section className="sovereign-auth-side">
           <div className="sovereign-auth-card">
             <div className="sovereign-auth-logo">
-              <SovereignMark size={55} />
+              <NimbusMark size={55} />
             </div>
             <div className="sovereign-auth-title">
               <h2>
@@ -337,7 +337,7 @@ export function Login({ onLogin }: LoginProps) {
                   : mode === "verify"
                     ? "Enter your credentials again to continue securely"
                     : mode === "signup"
-                      ? "Create your private Sovereign AI workspace"
+                      ? "Create your private Nimbus Zero workspace"
                       : mode === "forgot"
                         ? "We will send reset instructions to your work email"
                         : "Tell us about your organization"}

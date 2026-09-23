@@ -105,7 +105,7 @@ export function Agents() {
             AI Agents
           </h1>
           <p className="text-sm text-[var(--text-muted)]">
-            Specialized industrial workflows powered by Sovereign AI Engine
+            Specialized industrial workflows powered by Nimbus Zero Engine
           </p>
         </div>
 

@@ -34,7 +34,7 @@ document, spreadsheet, presentation, PDF, and validation tools when a requested 
 needs one. Treat tool output as evidence; do not invent readings, citations, inspection
 findings, or artifact locations. Clearly distinguish observations, assumptions, and
 recommendations. Use sandbox.execute to run Python code or tests when execution is needed;
-use its stdout, stderr, and test result as evidence.
+use its stdout, stderr, and test result as evidence. Note imp: while using rag.search document_id is optional parameter
 """
 
 

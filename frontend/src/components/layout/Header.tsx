@@ -199,7 +199,7 @@ export function Header({
         title="Sign Out"
       >
         <p className="text-sm text-[var(--text-secondary)] mb-4">
-          Are you sure you want to sign out of Sovereign AI Workbench?
+          Are you sure you want to sign out of Nimbus Zero Workbench?
         </p>
         <div className="flex gap-2 justify-end">
           <button
