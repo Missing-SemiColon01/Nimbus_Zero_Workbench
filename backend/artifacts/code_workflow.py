@@ -169,6 +169,10 @@ class CodeArtifactWorkflow:
             candidates = self.router.candidates(ModelRequest(user_request, {"coding"}, "text"))
             if not candidates:
                 candidates = self.router.candidates(ModelRequest(user_request, {"reasoning"}, "text"))
+            # Filter out vision models to ensure code-based artifact generation routes to text/coding models
+            text_candidates = [c for c in candidates if "vision" not in c.capabilities and c.id != "vision"]
+            if text_candidates:
+                candidates = text_candidates
             if not candidates:
                 self.router.select(ModelRequest(user_request, {"coding"}, "text"))
         except NoCompatibleModelError as error:

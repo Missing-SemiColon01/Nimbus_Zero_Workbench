@@ -86,6 +86,16 @@ def encode_image_to_base64(image_source: str | Path | bytes) -> str:
             return base64.b64encode(png_bytes).decode("utf-8")
         return base64.b64encode(image_source).decode("utf-8")
 
+    if isinstance(image_source, str):
+        if image_source.startswith("data:") and "," in image_source:
+            return image_source.split(",", 1)[1]
+        if len(image_source) > 200:
+            try:
+                base64.b64decode(image_source, validate=True)
+                return image_source
+            except Exception:
+                pass
+
     path = Path(image_source)
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {path}")
@@ -204,14 +214,19 @@ class VisionAnalyzeTool(Tool):
 
         # 1. Base64 Encode Image & Render PDF Page if applicable
         try:
-            target_path = Path(raw_path)
-            is_pdf = target_path.is_file() and target_path.suffix.lower() == ".pdf"
-            if is_pdf:
-                raw_bytes = await asyncio.to_thread(render_pdf_page_to_image, target_path, page_number=page_number)
-                base64_image = base64.b64encode(raw_bytes).decode("utf-8")
-            else:
+            if isinstance(raw_path, str) and (raw_path.startswith("data:") or len(raw_path) > 200):
+                is_pdf = False
                 base64_image = encode_image_to_base64(raw_path)
                 raw_bytes = base64.b64decode(base64_image)
+            else:
+                target_path = Path(raw_path)
+                is_pdf = target_path.is_file() and target_path.suffix.lower() == ".pdf"
+                if is_pdf:
+                    raw_bytes = await asyncio.to_thread(render_pdf_page_to_image, target_path, page_number=page_number)
+                    base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+                else:
+                    base64_image = encode_image_to_base64(raw_path)
+                    raw_bytes = base64.b64decode(base64_image)
         except Exception as exc:
             logger.error("Failed to read/render image for vision analysis: %s", exc)
             return ToolResult(

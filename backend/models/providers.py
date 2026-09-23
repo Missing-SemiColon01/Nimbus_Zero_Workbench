@@ -188,13 +188,18 @@ class OllamaProvider(ModelProvider):
 
     def _build_payload(self, model: ModelDefinition, request: ModelRequest, *, stream: bool) -> dict[str, Any]:
         messages = normalize_messages(request.messages, request.prompt, request.images)
+        has_image_support = "image" in model.modalities
         payload: dict[str, Any] = {
             "model": model.model,
             "messages": [
                 {
                     "role": message.role,
                     "content": message.content,
-                    **({"images": [self._clean_base64_image(img) for img in message.images]} if message.images else {}),
+                    **(
+                        {"images": [self._clean_base64_image(img) for img in message.images]}
+                        if (message.images and has_image_support)
+                        else {}
+                    ),
                 }
                 for message in messages
             ],

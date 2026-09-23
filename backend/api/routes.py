@@ -301,6 +301,12 @@ async def create_task(payload: TaskCreate, request: Request):
     user_request = payload.request
     if doc_context:
         user_request = f"{payload.request}\n\n[Attached Document Context]:\n{doc_context}"
+    if image_paths:
+        img_notifications = "\n".join(
+            f"[Attached Image: {p}] (Use vision.analyze with image_path='{p}' to inspect this image)"
+            for p in image_paths
+        )
+        user_request = f"{user_request}\n\n{img_notifications}"
 
     # Artifact detection is centralized with the agent's existing artifact
     # orchestration.  It honors task_type (report/artifact) and all supported
@@ -346,7 +352,7 @@ async def create_task(payload: TaskCreate, request: Request):
         sig = inspect.signature(request.app.state.agent.run)
         if "messages" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             messages = list(payload.messages or [])
-            if messages and doc_context:
+            if messages and (doc_context or image_paths):
                 for idx in range(len(messages) - 1, -1, -1):
                     m = messages[idx]
                     role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "")
@@ -432,12 +438,34 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
     async def _run_task() -> None:
         """Run in background — push events; always emit done on exit."""
         try:
+            uploads_dir: Path = settings.data_dir / "uploads"
+            document_paths = []
+            for dp in payload.document_paths:
+                try:
+                    document_paths.append(str(_resolve_inside(uploads_dir, dp)))
+                except HTTPException:
+                    document_paths.append(dp)
+
+            raw_docs = [*payload.documents, *document_paths]
+            documents, doc_context = _process_incoming_documents(raw_docs, uploads_dir)
+            images, image_paths = _process_incoming_images(payload.images or [], uploads_dir)
+
+            user_request = payload.request
+            if doc_context:
+                user_request = f"{payload.request}\n\n[Attached Document Context]:\n{doc_context}"
+            if image_paths:
+                img_notifications = "\n".join(
+                    f"[Attached Image: {p}] (Use vision.analyze with image_path='{p}' to inspect this image)"
+                    for p in image_paths
+                )
+                user_request = f"{user_request}\n\n{img_notifications}"
+
             artifact_intent = detect_artifact_intent(payload.request, payload.task_type)
             generate_artifact = getattr(agent, "generate_artifact", None)
 
             if artifact_intent is not None and callable(generate_artifact):
                 await generate_artifact(
-                    payload.request,
+                    user_request,
                     task_type=payload.task_type,
                     approved_tools=payload.approved_tools,
                     generation_mode=payload.generation_mode,
@@ -445,22 +473,6 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                     session_id=payload.session_id,
                 )
             else:
-                uploads_dir: Path = settings.data_dir / "uploads"
-                document_paths = []
-                for dp in payload.document_paths:
-                    try:
-                        document_paths.append(str(_resolve_inside(uploads_dir, dp)))
-                    except HTTPException:
-                        document_paths.append(dp)
-
-                raw_docs = [*payload.documents, *document_paths]
-                documents, doc_context = _process_incoming_documents(raw_docs, uploads_dir)
-                images, image_paths = _process_incoming_images(payload.images or [], uploads_dir)
-
-                user_request = payload.request
-                if doc_context:
-                    user_request = f"{payload.request}\n\n[Attached Document Context]:\n{doc_context}"
-
                 required_capabilities = payload.required_capabilities
                 if documents and payload.task_type is None and not payload.capabilities:
                     required_capabilities = {"document_understanding"}
@@ -474,7 +486,7 @@ async def stream_task(payload: TaskCreate, request: Request) -> StreamingRespons
                 sig = inspect.signature(agent.run)
                 if "messages" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                     messages = list(payload.messages or [])
-                    if messages and doc_context:
+                    if messages and (doc_context or image_paths):
                         for idx in range(len(messages) - 1, -1, -1):
                             m = messages[idx]
                             role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "")

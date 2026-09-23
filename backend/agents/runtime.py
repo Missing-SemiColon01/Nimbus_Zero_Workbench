@@ -216,10 +216,10 @@ class AgentRuntime:
                 resolved_modality = "text"
         if resolved_documents:
             resolved_capabilities.add("document_understanding")
-            # Image-capable document models commonly handle both inputs. A
-            # document-only request uses the explicit document modality.
-            if not resolved_images:
-                resolved_modality = "document"
+            # Document text is extracted and injected into the prompt/message context.
+            # Keep modality as text so reasoning model processes the document content.
+            if modality != "image":
+                resolved_modality = "text"
 
         effective_timeout = timeout if timeout is not None else self.config.timeout
         effective_max_retries = max_retries if max_retries is not None else self.config.max_retries

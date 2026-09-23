@@ -83,6 +83,11 @@ class CodingWorkflow:
         try:
             candidates = self.router.candidates(ModelRequest(requirement, {"coding"}, "text"))
             if not candidates:
+                candidates = self.router.candidates(ModelRequest(requirement, {"reasoning"}, "text"))
+            text_candidates = [c for c in candidates if "vision" not in c.capabilities and c.id != "vision"]
+            if text_candidates:
+                candidates = text_candidates
+            if not candidates:
                 self.router.select(ModelRequest(requirement, {"coding"}, "text"))
         except NoCompatibleModelError as error:
             return self._failed(

@@ -5,25 +5,39 @@ models:
     capabilities: [reasoning, planning, tool_calling]
     modalities: [text]
     priority: 10
-    enabled: true
+    enabled: false
   - id: reasoning-fallback
     runtime: ollama
     model: qwen3:8b
     capabilities: [reasoning, planning]
     modalities: [text]
     priority: 5
-    enabled: true
+    enabled: false
   - id: coding
     runtime: ollama
     model: qwen2.5-coder:14b
     capabilities: [coding, debugging, tool_calling]
     modalities: [text]
     priority: 10
-    enabled: true
+    enabled: false
   - id: vision
     runtime: ollama
-    model: qwen2.5-vl:7b
-    capabilities: [vision, document_understanding, reasoning]
-    modalities: [text, image, document]
+    model: qwen2.5vl:3b
+    capabilities: [vision]
+    modalities: [image, text]
     priority: 10
+    enabled: true
+  - id: reasoning
+    runtime: ollama
+    model: qwen3:1.7b
+    capabilities: [reasoning, planning, tool_calling, coding, report, document_understanding]
+    modalities: [text]
+    priority: 15
+    enabled: true
+  - id: reasoning-fallback
+    runtime: ollama
+    model: llama3.2:3b
+    capabilities: [reasoning, planning]
+    modalities: [text]
+    priority: 5
     enabled: true
