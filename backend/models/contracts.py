@@ -6,19 +6,21 @@ MessageRole = Literal["user", "assistant", "system"]
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    id: str | None = None
+
+
+@dataclass(frozen=True)
 class ChatMessage:
     """One message in a provider-neutral conversation."""
 
     role: MessageRole
     content: str
     images: list[str] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
-
-@dataclass(frozen=True)
-class ToolCall:
-    name: str
-    arguments: dict[str, Any] = field(default_factory=dict)
-    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,8 @@ def validate_chat_messages(messages: list["ChatMessage"]) -> None:
             not isinstance(image, str) or not image.strip() for image in message.images
         ):
             raise ValueError(f"messages[{index}].images must be a list of non-empty strings")
+        if not isinstance(message.tool_calls, list):
+            raise ValueError(f"messages[{index}].tool_calls must be a list")
 
 
 def normalize_messages(
@@ -115,6 +119,7 @@ def normalize_messages(
                 role="user",
                 content=latest.content,
                 images=[*latest.images, *images],
+                tool_calls=latest.tool_calls,
             )
         else:
             normalized.append(ChatMessage(role="user", content="", images=list(images)))

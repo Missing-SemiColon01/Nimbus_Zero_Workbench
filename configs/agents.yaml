@@ -14,8 +14,9 @@ agents:
       - artifact.validate
       - sandbox.execute
     runtime:
-      timeout: 60
-      tool_timeout: 30
+      timeout: 180
+      tool_timeout: 60
       max_retries: 2
       max_steps: 15
       max_tool_rounds: 3
+

@@ -29,8 +29,8 @@ from backend.agents.events import AgentEventStreamer
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    timeout: float = 60.0
-    tool_timeout: float = 30.0
+    timeout: float = 180.0
+    tool_timeout: float = 60.0
     tool_allowlist: frozenset[str] | None = None
     max_retries: int = 2
     max_steps: int = 15
@@ -153,9 +153,19 @@ class AgentRuntime:
             if isinstance(m, ChatMessage):
                 initial_messages.append(m)
             elif hasattr(m, "role") and hasattr(m, "content"):
-                initial_messages.append(ChatMessage(role=m.role, content=m.content, images=getattr(m, "images", []) or []))
+                initial_messages.append(ChatMessage(
+                    role=m.role,
+                    content=m.content,
+                    images=getattr(m, "images", []) or [],
+                    tool_calls=getattr(m, "tool_calls", []) or [],
+                ))
             elif isinstance(m, dict):
-                initial_messages.append(ChatMessage(role=m.get("role", "user"), content=m.get("content", ""), images=m.get("images", []) or []))
+                initial_messages.append(ChatMessage(
+                    role=m.get("role", "user"),
+                    content=m.get("content", ""),
+                    images=m.get("images", []) or [],
+                    tool_calls=m.get("tool_calls", []) or [],
+                ))
         if user_msg is not None:
             initial_messages.append(user_msg)
         resolved_images = self._validate_attachments(images, "images")
@@ -517,7 +527,8 @@ class AgentRuntime:
                 "Clearly state any remaining uncertainties or incomplete inspections."
             )
         elif tool_round > 0 and state.get("tool_results"):
-            tools = self._tool_schemas(state.get("tool_allowlist"))
+            # Tools have executed: strip tools to lift tool grammar constraints and stream the full synthesis
+            tools = []
             last_resp = state.get("model_response") or ModelResponse(content="")
             prompt = self._prompt_with_tool_results(self._model_prompt(state), last_resp, state.get("tool_results", []))
         else:
@@ -671,9 +682,19 @@ class AgentRuntime:
             if isinstance(m, ChatMessage):
                 result.append(m)
             elif hasattr(m, "role") and hasattr(m, "content"):
-                result.append(ChatMessage(role=m.role, content=m.content, images=getattr(m, "images", []) or []))
+                result.append(ChatMessage(
+                    role=m.role,
+                    content=m.content,
+                    images=getattr(m, "images", []) or [],
+                    tool_calls=getattr(m, "tool_calls", []) or [],
+                ))
             elif isinstance(m, dict):
-                result.append(ChatMessage(role=m.get("role", "user"), content=m.get("content", ""), images=m.get("images", []) or []))
+                result.append(ChatMessage(
+                    role=m.get("role", "user"),
+                    content=m.get("content", ""),
+                    images=m.get("images", []) or [],
+                    tool_calls=m.get("tool_calls", []) or [],
+                ))
         return result
 
     async def _generate_with_tools(
@@ -768,11 +789,15 @@ class AgentRuntime:
 
     def _detect_tool_calls(self, response: ModelResponse) -> list[ToolCall]:
         if response.tool_calls:
-            return response.tool_calls
+            valid = [c for call in response.tool_calls if (c := self._coerce_tool_call(call))]
+            if valid:
+                return valid
 
         raw_tool_calls = response.raw.get("tool_calls")
         if isinstance(raw_tool_calls, list):
-            return [call for item in raw_tool_calls if (call := self._coerce_tool_call(item))]
+            valid = [c for item in raw_tool_calls if (c := self._coerce_tool_call(item))]
+            if valid:
+                return valid
 
         cleaned = self._strip_code_fences(response.content)
         if not cleaned:
@@ -801,6 +826,8 @@ class AgentRuntime:
 
     def _coerce_tool_call(self, item: Any) -> ToolCall | None:
         if isinstance(item, ToolCall):
+            if self.tools is not None and item.name not in self.tools.names():
+                return None
             return item
         if not isinstance(item, dict):
             return None
@@ -813,8 +840,13 @@ class AgentRuntime:
                 return None
         if not isinstance(name, str) or not name.strip() or not isinstance(arguments, dict):
             return None
+        name = name.strip()
+        # Prevent false-positive tool detection from sample JSON or code written in the response:
+        # A tool call MUST match a registered tool name when tools are configured.
+        if self.tools is not None and name not in self.tools.names():
+            return None
         call_id = item.get("id") if isinstance(item.get("id"), str) else None
-        return ToolCall(name=name.strip(), arguments=arguments, id=call_id)
+        return ToolCall(name=name, arguments=arguments, id=call_id)
 
     async def _execute_tool_call_with_events(
         self,
