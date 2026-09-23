@@ -1,8 +1,9 @@
+from typing import Any, Literal
 from pydantic import BaseModel, Field
-from typing import Literal
 
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "system"]
-    content: str = Field(min_length=1)
+    content: str = Field(default="")
     images: list[str] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)

@@ -75,6 +75,8 @@ def _process_incoming_documents(documents: list[str], uploads_dir: Path) -> tupl
             ext = ".pdf"
             if "pdf" in meta:
                 ext = ".pdf"
+            elif "word" in meta or "docx" in meta or "document" in meta:
+                ext = ".docx"
             elif "text" in meta or "plain" in meta:
                 ext = ".txt"
             elif "csv" in meta:
@@ -134,6 +136,18 @@ def _process_incoming_documents(documents: list[str], uploads_dir: Path) -> tupl
             except Exception as e:
                 logger.warning("Failed to extract text from PDF %s: %s", path_str, e)
                 extracted_texts.append(f"--- Document located at {p} ---")
+        elif p.suffix.lower() == ".docx":
+            try:
+                import docx
+                doc_file = docx.Document(str(p))
+                paragraphs = [par.text.strip() for par in doc_file.paragraphs if par.text.strip()]
+                if paragraphs:
+                    extracted_texts.append(f"--- Document Content: {p.name} ---\n" + "\n".join(paragraphs))
+                else:
+                    extracted_texts.append(f"--- Document located at {p} ---")
+            except Exception as e:
+                logger.warning("Failed to extract text from DOCX %s: %s", path_str, e)
+                extracted_texts.append(f"--- Document located at {p} ---")
         elif p.suffix.lower() in {".txt", ".csv", ".md", ".json"}:
             try:
                 content = p.read_text(errors="replace")
@@ -154,8 +168,8 @@ def _process_incoming_images(images: list[str], uploads_dir: Path) -> tuple[list
     for img in images:
         if not img or not isinstance(img, str):
             continue
-        if img.startswith("data:") and ";base64," in img:
-            meta, b64_data = img.split(";base64,", 1)
+        if img.startswith("data:") and "," in img:
+            meta, b64_data = img.split(",", 1)
             ext = ".png"
             if "jpeg" in meta or "jpg" in meta:
                 ext = ".jpg"
@@ -173,7 +187,8 @@ def _process_incoming_images(images: list[str], uploads_dir: Path) -> tuple[list
         elif Path(img).exists():
             disk_paths.append(str(Path(img).resolve()))
         else:
-            b64_list.append(img)
+            clean_b64 = img.split(",", 1)[1] if (img.startswith("data:") and "," in img) else img
+            b64_list.append(clean_b64)
     return b64_list, disk_paths
 
 
@@ -316,6 +331,7 @@ async def create_task(payload: TaskCreate, request: Request):
             errors=result.errors,
             approval_required=result.approval_required,
             approval_requests=result.approval_requests,
+            messages=[],
         )
 
     required_capabilities = payload.required_capabilities
@@ -378,6 +394,18 @@ async def create_task(payload: TaskCreate, request: Request):
         errors=state.errors,
         approval_required=state.approval_required,
         approval_requests=state.approval_requests,
+        messages=[
+            ChatMessage(
+                role=m.role if hasattr(m, "role") else m.get("role", "assistant"),
+                content=m.content if hasattr(m, "content") else m.get("content", ""),
+                images=getattr(m, "images", []) or (m.get("images") if isinstance(m, dict) else []) or [],
+                tool_calls=[
+                    tc if isinstance(tc, dict) else (tc.to_dict() if hasattr(tc, "to_dict") else {"name": getattr(tc, "name", ""), "arguments": getattr(tc, "arguments", {})})
+                    for tc in (getattr(m, "tool_calls", []) or (m.get("tool_calls") if isinstance(m, dict) else []) or [])
+                ],
+            )
+            for m in (state.messages or [])
+        ],
     )
 
 

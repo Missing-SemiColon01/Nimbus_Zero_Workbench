@@ -153,21 +153,48 @@ class AgentRuntime:
             if isinstance(m, ChatMessage):
                 initial_messages.append(m)
             elif hasattr(m, "role") and hasattr(m, "content"):
+                raw_tc = getattr(m, "tool_calls", []) or []
+                coerced_tc = [
+                    tc if isinstance(tc, ToolCall) else ToolCall(
+                        name=tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", ""),
+                        arguments=tc.get("arguments", {}) if isinstance(tc, dict) else getattr(tc, "arguments", {}),
+                        id=tc.get("id", str(uuid.uuid4())) if isinstance(tc, dict) else getattr(tc, "id", str(uuid.uuid4())),
+                    )
+                    for tc in raw_tc
+                ]
                 initial_messages.append(ChatMessage(
                     role=m.role,
                     content=m.content,
                     images=getattr(m, "images", []) or [],
-                    tool_calls=getattr(m, "tool_calls", []) or [],
+                    tool_calls=coerced_tc,
                 ))
             elif isinstance(m, dict):
+                raw_tc = m.get("tool_calls") or []
+                coerced_tc = [
+                    tc if isinstance(tc, ToolCall) else ToolCall(
+                        name=tc.get("name", ""),
+                        arguments=tc.get("arguments", {}),
+                        id=tc.get("id", str(uuid.uuid4())),
+                    )
+                    for tc in raw_tc if isinstance(tc, (dict, ToolCall))
+                ]
                 initial_messages.append(ChatMessage(
                     role=m.get("role", "user"),
                     content=m.get("content", ""),
                     images=m.get("images", []) or [],
-                    tool_calls=m.get("tool_calls", []) or [],
+                    tool_calls=coerced_tc,
                 ))
         if user_msg is not None:
             initial_messages.append(user_msg)
+
+        if system_prompt and isinstance(system_prompt, str) and system_prompt.strip():
+            clean_sys = system_prompt.strip()
+            has_system = any(
+                (m.role == "system" if isinstance(m, ChatMessage) else getattr(m, "role", "") == "system")
+                for m in initial_messages
+            )
+            if not has_system:
+                initial_messages.insert(0, ChatMessage(role="system", content=clean_sys))
         resolved_images = self._validate_attachments(images, "images")
         resolved_documents = self._validate_attachments(documents, "documents")
         resolved_capabilities = set(capabilities)
@@ -682,18 +709,36 @@ class AgentRuntime:
             if isinstance(m, ChatMessage):
                 result.append(m)
             elif hasattr(m, "role") and hasattr(m, "content"):
+                raw_tc = getattr(m, "tool_calls", []) or []
+                coerced_tc = [
+                    tc if isinstance(tc, ToolCall) else ToolCall(
+                        name=tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", ""),
+                        arguments=tc.get("arguments", {}) if isinstance(tc, dict) else getattr(tc, "arguments", {}),
+                        id=tc.get("id", str(uuid.uuid4())) if isinstance(tc, dict) else getattr(tc, "id", str(uuid.uuid4())),
+                    )
+                    for tc in raw_tc
+                ]
                 result.append(ChatMessage(
                     role=m.role,
                     content=m.content,
                     images=getattr(m, "images", []) or [],
-                    tool_calls=getattr(m, "tool_calls", []) or [],
+                    tool_calls=coerced_tc,
                 ))
             elif isinstance(m, dict):
+                raw_tc = m.get("tool_calls") or []
+                coerced_tc = [
+                    tc if isinstance(tc, ToolCall) else ToolCall(
+                        name=tc.get("name", ""),
+                        arguments=tc.get("arguments", {}),
+                        id=tc.get("id", str(uuid.uuid4())),
+                    )
+                    for tc in raw_tc if isinstance(tc, (dict, ToolCall))
+                ]
                 result.append(ChatMessage(
                     role=m.get("role", "user"),
                     content=m.get("content", ""),
                     images=m.get("images", []) or [],
-                    tool_calls=m.get("tool_calls", []) or [],
+                    tool_calls=coerced_tc,
                 ))
         return result
 

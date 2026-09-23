@@ -68,3 +68,4 @@ class TaskResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
     approval_required: bool = False
     approval_requests: list[dict[str, Any]] = Field(default_factory=list)
+    messages: list[ChatMessage] = Field(default_factory=list)

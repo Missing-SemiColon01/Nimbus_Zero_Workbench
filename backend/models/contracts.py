@@ -90,17 +90,22 @@ def normalize_messages(
         validate_chat_messages(messages)
         normalized = list(messages)
         has_system = any(m.role == "system" for m in normalized)
-        if not has_system and isinstance(prompt, str) and prompt.startswith("System instructions:\n"):
-            parts = prompt.split("\n\nUser request:\n", 1)
-            sys_text = parts[0].replace("System instructions:\n", "", 1).strip()
+        if not has_system and isinstance(prompt, str) and "System instructions:\n" in prompt:
+            parts = prompt.split("System instructions:\n", 1)[1]
+            if "\n\nUser request:\n" in parts:
+                sys_text = parts.split("\n\nUser request:\n", 1)[0].strip()
+            elif "\n\n" in parts:
+                sys_text = parts.split("\n\n", 1)[0].strip()
+            else:
+                sys_text = parts.strip()
             if sys_text:
                 normalized.insert(0, ChatMessage(role="system", content=sys_text))
     else:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("prompt must be non-empty when messages is empty")
-        if prompt.startswith("System instructions:\n") and "\n\nUser request:\n" in prompt:
-            parts = prompt.split("\n\nUser request:\n", 1)
-            sys_text = parts[0].replace("System instructions:\n", "", 1).strip()
+        if "System instructions:\n" in prompt and "\n\nUser request:\n" in prompt:
+            parts = prompt.split("System instructions:\n", 1)[1].split("\n\nUser request:\n", 1)
+            sys_text = parts[0].strip()
             user_text = parts[1].strip()
             normalized = [
                 ChatMessage(role="system", content=sys_text),

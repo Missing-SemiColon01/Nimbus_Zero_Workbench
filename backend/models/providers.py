@@ -200,8 +200,6 @@ class OllamaProvider(ModelProvider):
             ],
             "stream": stream,
         }
-        if request.documents:
-            payload["documents"] = request.documents
         if request.tools:
             payload["tools"] = self._format_tools(request.tools)
         return payload
