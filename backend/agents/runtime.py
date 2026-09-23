@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import json
+import re
 import time
 import uuid
 from typing import Any, TypedDict
@@ -36,7 +37,7 @@ class RuntimeConfig:
     max_tool_rounds: int = 3
 
 
-def detect_cycle(history: list[str], min_repetitions: int = 3) -> bool:
+def detect_cycle(history: list[str], min_repetitions: int = 4) -> bool:
     """Detect if a sequence of node names repeats min_repetitions times at the end of history."""
     n = len(history)
     for cycle_len in range(1, (n // min_repetitions) + 1):
@@ -83,6 +84,8 @@ class AgentGraphState(TypedDict):
     approval_required: bool
     approval_requests: list[dict[str, Any]]
     streamer: AgentEventStreamer | None
+    tool_round: int
+    pending_tool_calls: list[ToolCall]
 
 
 class AgentRuntime:
@@ -105,10 +108,20 @@ class AgentRuntime:
         workflow = StateGraph(AgentGraphState)
         workflow.add_node("validate_input", self._validate_input)
         workflow.add_node("generate_response", self._generate_response)
+        workflow.add_node("execute_tools", self._execute_tools)
         workflow.add_node("validate_output", self._validate_output)
+
         workflow.add_edge(START, "validate_input")
         workflow.add_edge("validate_input", "generate_response")
-        workflow.add_edge("generate_response", "validate_output")
+        workflow.add_conditional_edges(
+            "generate_response",
+            self._route_after_generation,
+            {
+                "execute_tools": "execute_tools",
+                "validate_output": "validate_output",
+            },
+        )
+        workflow.add_edge("execute_tools", "generate_response")
         workflow.add_edge("validate_output", END)
         self.graph = workflow.compile()
 
@@ -149,9 +162,21 @@ class AgentRuntime:
         resolved_documents = self._validate_attachments(documents, "documents")
         resolved_capabilities = set(capabilities)
         resolved_modality = modality
+        effective_tool_allowlist = self._effective_tool_allowlist(tool_allowlist)
+
+        has_vision_tool = bool(
+            self.tools and "vision.analyze" in self.tools.names()
+            and (effective_tool_allowlist is None or "vision.analyze" in effective_tool_allowlist)
+        )
         if resolved_images:
-            resolved_capabilities.add("vision")
-            resolved_modality = "image"
+            if not has_vision_tool or modality == "image":
+                resolved_capabilities.add("vision")
+                resolved_modality = "image"
+            else:
+                # Orchestrator-Worker pattern: Top-level agent is text reasoning model
+                # that delegates image analysis to vision.analyze tool
+                resolved_capabilities.add("reasoning")
+                resolved_modality = "text"
         if resolved_documents:
             resolved_capabilities.add("document_understanding")
             # Image-capable document models commonly handle both inputs. A
@@ -162,7 +187,6 @@ class AgentRuntime:
         effective_timeout = timeout if timeout is not None else self.config.timeout
         effective_max_retries = max_retries if max_retries is not None else self.config.max_retries
         effective_max_steps = max_steps if max_steps is not None else self.config.max_steps
-        effective_tool_allowlist = self._effective_tool_allowlist(tool_allowlist)
 
         if streamer is not None:
             streamer.emit_task_init(
@@ -200,6 +224,8 @@ class AgentRuntime:
             "approval_required": False,
             "approval_requests": [],
             "streamer": streamer,
+            "tool_round": 0,
+            "pending_tool_calls": [],
         }
 
         # Pre-validate input state before invoking workflow
@@ -406,26 +432,110 @@ class AgentRuntime:
             "node_history": node_history,
         }
 
+    def _route_after_generation(self, state: AgentGraphState) -> str:
+        """Route to execute_tools if pending tool calls exist, else validate_output."""
+        if state.get("status") == "failed":
+            return "validate_output"
+        if state.get("approval_required") or bool(state.get("approval_requests")):
+            return "validate_output"
+        pending = state.get("pending_tool_calls") or []
+        tool_round = state.get("tool_round", 0)
+        max_tool_rounds = state.get("max_tool_rounds", self.config.max_tool_rounds)
+        if pending and tool_round < max_tool_rounds:
+            return "execute_tools"
+        return "validate_output"
+
+    async def _execute_tools(self, state: AgentGraphState) -> dict[str, Any]:
+        """Execute pending tool calls from the model turn and accumulate results."""
+        step_count, node_history = self._track_step(state, "execute_tools")
+        pending = list(state.get("pending_tool_calls") or [])
+        tool_round = state.get("tool_round", 0) + 1
+        streamer: AgentEventStreamer | None = state.get("streamer")
+
+        round_results = [await self._execute_tool_call_with_events(tool_call, state) for tool_call in pending]
+        tool_results = [*state.get("tool_results", []), *round_results]
+
+        approval_requests = list(state.get("approval_requests", []))
+        approval_requests.extend(
+            self._approval_request(tool_call, result)
+            for tool_call, result in zip(pending, round_results)
+            if self._requires_approval(result)
+        )
+        approval_required = bool(approval_requests)
+
+        # Retain structured tool calls and tool outputs in conversational messages state (Audit Flaw 1.5)
+        new_messages = list(state.get("messages", []))
+        new_messages.append(ChatMessage(
+            role="assistant",
+            content=json.dumps([{"tool": tc.name, "arguments": tc.arguments} for tc in pending], default=str),
+            tool_calls=pending,
+        ))
+        new_messages.append(ChatMessage(
+            role="user",
+            content=(
+                f"Tool execution results:\n{json.dumps([r.output if r.success else r.error for r in round_results], default=str)}\n\n"
+                "Use the tool results above to produce the final answer. If a tool failed, explain the failure clearly."
+            ),
+        ))
+
+        if streamer is not None:
+            streamer.emit_thought("Analyzing tool results and synthesizing response...")
+
+        return {
+            "step_count": step_count,
+            "node_history": node_history,
+            "tool_results": tool_results,
+            "tool_round": tool_round,
+            "pending_tool_calls": [],
+            "approval_requests": approval_requests,
+            "approval_required": approval_required,
+            "messages": new_messages,
+            "status": "awaiting_approval" if approval_required else "running",
+        }
+
     async def _generate_response(self, state: AgentGraphState) -> dict[str, Any]:
-        """Route and generate through the existing provider abstraction with retry limits."""
+        """Route and generate through the provider abstraction with streaming and tool detection."""
         step_count, node_history = self._track_step(state, "generate_response")
         streamer: AgentEventStreamer | None = state.get("streamer")
+        tool_round = state.get("tool_round", 0)
+        max_tool_rounds = state.get("max_tool_rounds", self.config.max_tool_rounds)
+        is_max_rounds = tool_round >= max_tool_rounds
+
         if streamer is not None:
-            streamer.emit_thought("Generating response...")
+            if tool_round == 0:
+                streamer.emit_thought("Generating response...")
+            else:
+                streamer.emit_thought("Synthesizing final response...")
+
+        # If max tool rounds reached, strip tools and enforce final answer synthesis (Audit Flaw 1.4)
+        if is_max_rounds:
+            tools = []
+            prompt = (
+                f"{self._model_prompt(state)}\n\n"
+                f"[Advisory]: Maximum tool rounds limit ({max_tool_rounds}) reached. "
+                "Synthesize your best-effort final answer based strictly on the accumulated tool evidence. "
+                "Clearly state any remaining uncertainties or incomplete inspections."
+            )
+        elif tool_round > 0 and state.get("tool_results"):
+            tools = self._tool_schemas(state.get("tool_allowlist"))
+            last_resp = state.get("model_response") or ModelResponse(content="")
+            prompt = self._prompt_with_tool_results(self._model_prompt(state), last_resp, state.get("tool_results", []))
+        else:
+            tools = self._tool_schemas(state.get("tool_allowlist"))
+            prompt = self._model_prompt(state)
 
         model_request = ModelRequest(
-            prompt=self._model_prompt(state),
+            prompt=prompt,
             messages=self._build_request_messages(state),
             required_capabilities=state["required_capabilities"],
             required_modality=state["modality"],
             images=state.get("images", []),
             documents=state.get("documents", []),
-            tools=self._tool_schemas(state.get("tool_allowlist")),
+            tools=tools,
             tool_results=state.get("tool_results", []),
         )
         candidates = self.router.candidates(model_request)
         if not candidates:
-            # Preserve the router's established public error for this case.
             self.router.select(model_request)
 
         last_error: ProviderError | None = None
@@ -443,85 +553,83 @@ class AgentRuntime:
 
             attempted_models.append(model.id)
             try:
-                if streamer is not None:
-                    # Stream tokens directly to SSE and accumulate
-                    accumulated = ""
-                    async for token in self.providers.stream_generate(model, model_request):
-                        accumulated += token
-                        streamer.emit_content_delta(token)
-                    if model_request.tools:
-                        response = await self.providers.generate(model, model_request)
-                    else:
+                # Case 1: No tools on request (conversational turn or forced final synthesis)
+                if not model_request.tools:
+                    if streamer is not None:
+                        accumulated = ""
+                        async for token in self.providers.stream_generate(model, model_request):
+                            accumulated += token
+                            streamer.emit_content_delta(token)
                         response = ModelResponse(content=accumulated, model_id=model.id)
-                else:
-                    response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
+                    else:
+                        response = await self.providers.generate(model, model_request)
+
                     final_content = response.content.strip() or "Task execution completed."
                     return {
                         "selected_model": model.id,
                         "provider": model.runtime,
                         "fallback_used": len(attempted_models) > 1,
                         "attempted_models": attempted_models,
-                        "messages": [*state["messages"], ChatMessage(role="assistant", content=final_content)],
+                        "messages": [*state.get("messages", []), ChatMessage(role="assistant", content=final_content)],
                         "final_response": final_content,
                         "errors": errors,
                         "model_response": response,
-                        "tool_results": tool_results,
-                        "approval_required": bool(approval_requests),
-                        "approval_requests": approval_requests,
-                        "status": "awaiting_approval" if approval_requests else "completed",
+                        "pending_tool_calls": [],
+                        "status": "completed",
                         "step_count": step_count,
                         "node_history": node_history,
                     }
+
+                # Case 2: Tools available on request
+                # Generate buffered first so tool JSON is NOT leaked to chat (Audit Flaw 1.2)
+                response = await self.providers.generate(model, model_request)
+                tool_calls = self._detect_tool_calls(response)
+
+                if tool_calls:
+                    # Model chose to call tools; do not stream JSON to chat UI
+                    return {
+                        "selected_model": model.id,
+                        "provider": model.runtime,
+                        "fallback_used": len(attempted_models) > 1,
+                        "attempted_models": attempted_models,
+                        "errors": errors,
+                        "model_response": response,
+                        "pending_tool_calls": tool_calls,
+                        "status": "running",
+                        "step_count": step_count,
+                        "node_history": node_history,
+                    }
+                else:
+                    # Model answered directly without invoking any tools
+                    if streamer is not None and response.content:
+                        for chunk in re.split(r"(\s+)", response.content):
+                            if chunk:
+                                streamer.emit_content_delta(chunk)
+
+                    final_content = response.content.strip() or "Task execution completed."
+                    return {
+                        "selected_model": model.id,
+                        "provider": model.runtime,
+                        "fallback_used": len(attempted_models) > 1,
+                        "attempted_models": attempted_models,
+                        "messages": [*state.get("messages", []), ChatMessage(role="assistant", content=final_content)],
+                        "final_response": final_content,
+                        "errors": errors,
+                        "model_response": response,
+                        "pending_tool_calls": [],
+                        "status": "completed",
+                        "step_count": step_count,
+                        "node_history": node_history,
+                    }
+
             except ProviderRequestError:
-                # A malformed request must not be retried against another model.
                 raise
             except ProviderError as error:
                 last_error = error
                 errors.append(str(error))
                 continue
 
-            # For streaming path without tools, we need to handle the response
-            if streamer is not None and not model_request.tools:
-                final_content = response.content.strip() or "Task execution completed."
-                return {
-                    "selected_model": model.id,
-                    "provider": model.runtime,
-                    "fallback_used": len(attempted_models) > 1,
-                    "attempted_models": attempted_models,
-                    "messages": [*state["messages"], ChatMessage(role="assistant", content=final_content)],
-                    "final_response": final_content,
-                    "errors": errors,
-                    "model_response": response,
-                    "tool_results": [],
-                    "approval_required": False,
-                    "approval_requests": [],
-                    "status": "completed",
-                    "step_count": step_count,
-                    "node_history": node_history,
-                }
-            elif streamer is not None and model_request.tools:
-                # Tools case: fall through to _generate_with_tools
-                response, tool_results, approval_requests = await self._generate_with_tools(model, model_request, state)
-                final_content = response.content.strip() or "Task execution completed."
-                return {
-                    "selected_model": model.id,
-                    "provider": model.runtime,
-                    "fallback_used": len(attempted_models) > 1,
-                    "attempted_models": attempted_models,
-                    "messages": [*state["messages"], ChatMessage(role="assistant", content=final_content)],
-                    "final_response": final_content,
-                    "errors": errors,
-                    "model_response": response,
-                    "tool_results": tool_results,
-                    "approval_required": bool(approval_requests),
-                    "approval_requests": approval_requests,
-                    "status": "awaiting_approval" if approval_requests else "completed",
-                    "step_count": step_count,
-                    "node_history": node_history,
-                }
-
         # If all candidates fail or retry limit reached:
-        # Capture errors in the errors field and return a predictable failure response
         assert last_error is not None
         predictable_response = f"Model generation failed: {last_error}"
         failed_model_id = attempted_models[-1] if attempted_models else candidates[0].id
@@ -536,7 +644,7 @@ class AgentRuntime:
             "provider": None,
             "fallback_used": fallback_used,
             "attempted_models": attempted_models,
-            "messages": [*state["messages"], ChatMessage(role="assistant", content=predictable_response)],
+            "messages": [*state.get("messages", []), ChatMessage(role="assistant", content=predictable_response)],
             "final_response": predictable_response,
             "errors": errors,
             "model_response": model_response,
@@ -613,7 +721,34 @@ class AgentRuntime:
             )
             response = await self.providers.generate(model, request)
 
-        raise ProviderError(f"Maximum tool rounds ({self.config.max_tool_rounds}) exceeded")
+        # Graceful Answer Synthesis on Max Tool Rounds Limit (Task 1.3 / Audit Flaw 1.4)
+        final_prompt = (
+            f"{self._model_prompt(state)}\n\n"
+            f"[Advisory]: Maximum tool rounds limit ({self.config.max_tool_rounds}) reached. "
+            "Synthesize your best-effort final answer based strictly on the accumulated tool results above. "
+            "Clearly note any pending steps or unresolved questions as an advisory."
+        )
+        round_messages = self._build_request_messages(state)
+        round_messages.append(ChatMessage(role="assistant", content=response.content or "Completed tool rounds."))
+        round_messages.append(ChatMessage(
+            role="user",
+            content=(
+                f"Accumulated tool execution results:\n{json.dumps([r.output if r.success else r.error for r in tool_results], default=str)}\n\n"
+                "Maximum tool iteration rounds reached. Formulate your final response with all evidence collected."
+            ),
+        ))
+        final_request = ModelRequest(
+            prompt=final_prompt,
+            messages=round_messages,
+            required_capabilities=initial_request.required_capabilities,
+            required_modality=initial_request.required_modality,
+            images=initial_request.images,
+            documents=initial_request.documents,
+            tools=[],
+            tool_results=tool_results,
+        )
+        final_response = await self.providers.generate(model, final_request)
+        return final_response, tool_results, approval_requests
 
     @staticmethod
     def _model_prompt(state: AgentGraphState) -> str:
@@ -623,6 +758,14 @@ class AgentRuntime:
             return state["user_prompt"]
         return f"System instructions:\n{system_prompt}\n\nUser request:\n{state['user_prompt']}"
 
+    @staticmethod
+    def _strip_code_fences(content: str) -> str:
+        """Strip markdown ```json ... ``` or ``` ... ``` code blocks if present (Audit Flaw 1.3)."""
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
+        if match:
+            return match.group(1).strip()
+        return content.strip()
+
     def _detect_tool_calls(self, response: ModelResponse) -> list[ToolCall]:
         if response.tool_calls:
             return response.tool_calls
@@ -631,13 +774,24 @@ class AgentRuntime:
         if isinstance(raw_tool_calls, list):
             return [call for item in raw_tool_calls if (call := self._coerce_tool_call(item))]
 
-        stripped = response.content.strip()
-        if not stripped:
+        cleaned = self._strip_code_fences(response.content)
+        if not cleaned:
             return []
         try:
-            payload = json.loads(stripped)
+            payload = json.loads(cleaned)
         except json.JSONDecodeError:
-            return []
+            # Fallback: extract the first complete { ... } or [ ... ] substring
+            brace_match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", cleaned)
+            if brace_match:
+                try:
+                    payload = json.loads(brace_match.group(1))
+                except json.JSONDecodeError:
+                    return []
+            else:
+                return []
+
+        if isinstance(payload, list):
+            return [call for item in payload if (call := self._coerce_tool_call(item))]
         if isinstance(payload, dict) and "tool_calls" in payload and isinstance(payload["tool_calls"], list):
             return [call for item in payload["tool_calls"] if (call := self._coerce_tool_call(item))]
         if isinstance(payload, dict) and ("tool" in payload or "name" in payload):
