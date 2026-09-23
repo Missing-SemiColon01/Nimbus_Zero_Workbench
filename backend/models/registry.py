@@ -22,7 +22,7 @@ class ModelRegistry:
         ]
 
     def candidates(self, capabilities: set[str], modality: str) -> list[ModelDefinition]:
-        return sorted(
+        exact_matches = sorted(
             (
                 model
                 for model in self.models
@@ -33,3 +33,19 @@ class ModelRegistry:
             key=lambda model: model.priority,
             reverse=True,
         )
+        if exact_matches:
+            return exact_matches
+
+        # Resilient fallback: match enabled models supporting the modality,
+        # ranked by capability overlap and priority.
+        scored_candidates = []
+        for model in self.models:
+            if not model.enabled:
+                continue
+            if modality in model.modalities:
+                overlap = len(capabilities & model.capabilities)
+                scored_candidates.append((overlap, model.priority, model))
+
+        scored_candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [item[2] for item in scored_candidates if item[0] > 0 or item[2].priority > 0]
+
