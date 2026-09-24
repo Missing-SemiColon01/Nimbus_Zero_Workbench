@@ -272,6 +272,58 @@ class KnowledgeRetriever:
         """Return total number of indexed knowledge chunks."""
         return self.vector_store.count()
 
+    def sync_knowledge_directory(self, knowledge_dir: Path | str = "data/knowledge") -> list[IngestResult]:
+        """
+        Scan knowledge_dir for PDF files and ingest any that are not yet indexed in Qdrant.
+        """
+        kdir = Path(knowledge_dir)
+        if not kdir.exists():
+            return []
+
+        indexed_files: set[str] = set()
+        indexed_docs: set[str] = set()
+        try:
+            offset = None
+            while True:
+                records, next_offset = self.vector_store.client.scroll(
+                    collection_name=self.vector_store.collection_name,
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for record in records:
+                    p = record.payload or {}
+                    if "filename" in p and p["filename"]:
+                        indexed_files.add(str(p["filename"]).lower())
+                    if "document_id" in p and p["document_id"]:
+                        indexed_docs.add(str(p["document_id"]).lower())
+                if next_offset is None or not records:
+                    break
+                offset = next_offset
+        except Exception as exc:
+            logger.warning("Could not scroll vector store to check indexed files: %s", exc)
+
+        results: list[IngestResult] = []
+        for pdf_file in sorted(kdir.glob("*.pdf")):
+            fname = pdf_file.name
+            doc_id = pdf_file.stem
+            # Ignore Zone.Identifier or hidden files
+            if ":Zone.Identifier" in fname or fname.startswith("."):
+                continue
+            # Skip if already indexed
+            if fname.lower() in indexed_files or doc_id.lower() in indexed_docs:
+                continue
+
+            logger.info("Auto-indexing new knowledge document: %s", fname)
+            try:
+                res = self.ingest_document(pdf_file, document_id=doc_id)
+                results.append(res)
+            except Exception as e:
+                logger.warning("Failed to auto-index %s: %s", fname, e)
+
+        return results
+
 
 # -- global singleton accessor -------------------------------------------------
 _RETRIEVER_INSTANCE: KnowledgeRetriever | None = None

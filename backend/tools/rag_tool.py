@@ -55,7 +55,10 @@ class RAGSearchTool(Tool):
             },
             "document_id": {
                 "type": "string",
-                "description": "Optional document ID to restrict search scope to a single document.",
+                "description": (
+                    "Optional document ID or filename (e.g. 'sample-table.pdf' or 'sample-table') "
+                    "to restrict search scope. Leave omitted to search across all knowledge documents."
+                ),
             },
             "score_threshold": {
                 "type": "number",
@@ -98,6 +101,13 @@ class RAGSearchTool(Tool):
         if score_threshold is not None:
             score_threshold = float(score_threshold)
 
+        # Smart extraction: if document_id is not explicitly provided, detect if query references a PDF file
+        if not document_id:
+            import re
+            pdf_match = re.search(r"([\w\-]+\.pdf)", query, re.IGNORECASE)
+            if pdf_match:
+                document_id = pdf_match.group(1)
+
         try:
             hits = await asyncio.to_thread(
                 self.retriever.search,
@@ -106,6 +116,69 @@ class RAGSearchTool(Tool):
                 score_threshold=score_threshold,
                 filter_doc_id=document_id,
             )
+
+            # Fallback 1: If document_id was provided or inferred, but returned 0 hits, retry without filter
+            if not hits and document_id:
+                logger.info(
+                    "rag.search with document_id='%s' returned 0 hits; retrying search across all documents.",
+                    document_id,
+                )
+                hits = await asyncio.to_thread(
+                    self.retriever.search,
+                    query=query,
+                    top_k=top_k,
+                    score_threshold=score_threshold,
+                    filter_doc_id=None,
+                )
+
+            # Fallback 2: If score_threshold was applied and resulted in 0 hits, retry without threshold
+            if not hits and score_threshold is not None:
+                logger.info(
+                    "rag.search with score_threshold=%.2f returned 0 hits; retrying without threshold.",
+                    score_threshold,
+                )
+                hits = await asyncio.to_thread(
+                    self.retriever.search,
+                    query=query,
+                    top_k=top_k,
+                    score_threshold=None,
+                    filter_doc_id=document_id,
+                )
+                if not hits and document_id:
+                    hits = await asyncio.to_thread(
+                        self.retriever.search,
+                        query=query,
+                        top_k=top_k,
+                        score_threshold=None,
+                        filter_doc_id=None,
+                    )
+
+            # Fallback 3: If still no hits and a specific file was referenced, check if it exists on disk and auto-ingest it
+            if not hits and document_id:
+                from pathlib import Path
+                for search_dir in [Path("data/knowledge"), Path("data/uploads")]:
+                    candidate_file = search_dir / document_id
+                    if not candidate_file.exists() and not document_id.lower().endswith(".pdf"):
+                        candidate_file = search_dir / f"{document_id}.pdf"
+                    if candidate_file.is_file():
+                        logger.info("Auto-ingesting referenced document on-the-fly: %s", candidate_file)
+                        try:
+                            await asyncio.to_thread(
+                                self.retriever.ingest_document,
+                                source=candidate_file,
+                                document_id=candidate_file.stem,
+                            )
+                            hits = await asyncio.to_thread(
+                                self.retriever.search,
+                                query=query,
+                                top_k=top_k,
+                                score_threshold=None,
+                                filter_doc_id=candidate_file.stem,
+                            )
+                        except Exception as ingest_err:
+                            logger.warning("On-the-fly ingestion failed for %s: %s", candidate_file, ingest_err)
+                        if hits:
+                            break
 
             # Sync with AgentState if present in execution context
             self._sync_context(hits, context)

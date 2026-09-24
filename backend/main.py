@@ -45,6 +45,13 @@ async def lifespan(app: FastAPI):
     )
     # Initialize MongoDB connection pool (if MONGODB_URI is provided)
     await init_mongo(settings)
+    # Background sync of knowledge documents in data/knowledge
+    try:
+        import asyncio
+        from backend.knowledge.retriever import get_retriever
+        asyncio.create_task(asyncio.to_thread(get_retriever().sync_knowledge_directory))
+    except Exception:
+        pass
     try:
         yield
     finally:

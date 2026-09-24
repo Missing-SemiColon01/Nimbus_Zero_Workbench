@@ -199,14 +199,31 @@ class VectorStore:
         """
         query_filter: models.Filter | None = None
         if filter_doc_id:
-            query_filter = models.Filter(
-                must=[
+            clean_id = filter_doc_id.strip()
+            path_obj = Path(clean_id)
+            stem = path_obj.stem
+            name = path_obj.name
+            candidates = {clean_id, stem, name}
+            if not clean_id.lower().endswith(".pdf"):
+                candidates.add(f"{clean_id}.pdf")
+            if not stem.lower().endswith(".pdf"):
+                candidates.add(f"{stem}.pdf")
+
+            should_conditions: list[models.FieldCondition] = []
+            for cand in candidates:
+                should_conditions.append(
                     models.FieldCondition(
                         key="document_id",
-                        match=models.MatchValue(value=filter_doc_id),
+                        match=models.MatchValue(value=cand),
                     )
-                ]
-            )
+                )
+                should_conditions.append(
+                    models.FieldCondition(
+                        key="filename",
+                        match=models.MatchValue(value=cand),
+                    )
+                )
+            query_filter = models.Filter(should=should_conditions)
 
         response = self.client.query_points(
             collection_name=self.collection_name,
@@ -215,6 +232,21 @@ class VectorStore:
             limit=top_k,
             score_threshold=score_threshold,
         )
+
+        # Fallback: If filtered search returned 0 results, retry without filter
+        # so relevant content is not missed due to ID or filename mismatches.
+        if filter_doc_id and not response.points:
+            logger.info(
+                "VectorStore: 0 points matched filter_doc_id '%s'; falling back to unfiltered semantic search.",
+                filter_doc_id,
+            )
+            response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=list(query_vector),
+                query_filter=None,
+                limit=top_k,
+                score_threshold=score_threshold,
+            )
 
         results: list[SearchResult] = []
         for scored_point in response.points:
@@ -268,18 +300,23 @@ class VectorStore:
         )
 
     def delete_document(self, document_id: str) -> None:
-        """Delete all chunks belonging to a specific document_id."""
+        """Delete all chunks belonging to a specific document_id or filename."""
+        clean_id = document_id.strip()
+        path_obj = Path(clean_id)
+        stem = path_obj.stem
+        candidates = {clean_id, stem, path_obj.name}
+        if not clean_id.lower().endswith(".pdf"):
+            candidates.add(f"{clean_id}.pdf")
+
+        should_conditions = []
+        for cand in candidates:
+            should_conditions.append(models.FieldCondition(key="document_id", match=models.MatchValue(value=cand)))
+            should_conditions.append(models.FieldCondition(key="filename", match=models.MatchValue(value=cand)))
+
         self.client.delete(
             collection_name=self.collection_name,
             points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="document_id",
-                            match=models.MatchValue(value=document_id),
-                        )
-                    ]
-                )
+                filter=models.Filter(should=should_conditions)
             ),
         )
         logger.info("Deleted document '%s' from collection '%s'.", document_id, self.collection_name)
