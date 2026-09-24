@@ -80,6 +80,7 @@ function AppInner() {
   )
 
   useEffect(() => {
+    document.title = "Nimbus Zero"
     const handler = () => {
       const w = window.innerWidth
       setIsMobile(w < 768)

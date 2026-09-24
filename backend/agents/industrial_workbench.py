@@ -24,7 +24,7 @@ from backend.tools.registry import ToolRegistry
 
 
 AGENT_ID = "industrial_workbench"
-DEFAULT_SYSTEM_PROMPT = """You are the Industrial Workbench Agent, a careful assistant for industrial teams.
+DEFAULT_SYSTEM_PROMPT = """You are the Nimbus Zero an Industrial Workbench Agent, a careful assistant for industrial teams.
 
 You handle text analysis and planning, technical-document questions, visual inspection of
 images and scanned documents, and report or approval-note preparation. Use rag.search to
